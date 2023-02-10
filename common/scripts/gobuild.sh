@@ -45,8 +45,14 @@ BUILDINFO=${BUILDINFO:-""}
 STATIC=${STATIC:-1}
 LDFLAGS=${LDFLAGS:--extldflags -static}
 GOBUILDFLAGS=${GOBUILDFLAGS:-""}
+GOEXPERIMENT=${GOEXPERIMENT:-"none"}
+
 # Split GOBUILDFLAGS by spaces into an array called GOBUILDFLAGS_ARRAY.
 IFS=' ' read -r -a GOBUILDFLAGS_ARRAY <<< "$GOBUILDFLAGS"
+
+# Split GOBUILDVARS by spaces into an array called GOBUILDVARS_ARRAY.
+IFS=' ' read -r -a GOBUILDVARS_ARRAY <<< "$GOBUILDVARS"
+
 
 GCFLAGS=${GCFLAGS:-}
 export CGO_ENABLED=${CGO_ENABLED:-0}
@@ -54,6 +60,7 @@ export CGO_ENABLED=${CGO_ENABLED:-0}
 if [[ "${STATIC}" !=  "1" ]];then
     LDFLAGS=""
 fi
+
 
 # gather buildinfo if not already provided
 # For a release build BUILDINFO should be produced
@@ -75,7 +82,7 @@ if [ "${DEBUG}" == "1" ]; then
     OPTIMIZATION_FLAGS=()
 fi
 
-time GOOS=${BUILD_GOOS} GOARCH=${BUILD_GOARCH} ${GOBINARY} build \
+time GOOS=${BUILD_GOOS} GOARCH=${BUILD_GOARCH} GOEXPERIMENT=${GOEXPERIMENT} ${GOBINARY} build \
         ${V} "${GOBUILDFLAGS_ARRAY[@]}" ${GCFLAGS:+-gcflags "${GCFLAGS}"} \
         -o "${OUT}" \
         "${OPTIMIZATION_FLAGS[@]}" \
