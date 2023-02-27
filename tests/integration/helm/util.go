@@ -108,7 +108,8 @@ func InstallIstio(t framework.TestContext, cs cluster.Cluster, h *helm.Helm, ove
 // the provided releaseNamespace, and the namespaces for the actual Istio resources are configured
 // via the override values file.
 func InstallIstioCustomReleaseNamespace(t framework.TestContext, cs cluster.Cluster, h *helm.Helm, releaseNamespace, version string,
-	installGateway bool, overrideValuesFileMap map[string]string, provisionNamespaces func()) {
+	installGateway bool, overrideValuesFileMap map[string]string, provisionNamespaces func(),
+) {
 	provisionNamespaces()
 
 	versionArgs := ""

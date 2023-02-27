@@ -25,6 +25,8 @@ import (
 	"strings"
 	"testing"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	networking "istio.io/api/networking/v1alpha3"
 	"istio.io/client-go/pkg/apis/networking/v1alpha3"
 	"istio.io/istio/pkg/config/protocol"
@@ -41,7 +43,6 @@ import (
 	"istio.io/istio/pkg/test/util/retry"
 	"istio.io/istio/pkg/util/sets"
 	"istio.io/istio/tests/util/sanitycheck"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // TestDefaultInstall tests Istio installation using Helm with default options
@@ -124,7 +125,7 @@ global:
 		return out, nil
 	}
 
-	runSanityCheck := func(t framework.TestContext, systemNamespace string) error {
+	runSanityCheck := func(t framework.TestContext, systemNamespace string) {
 		scopes.Framework.Infof("running sanity test")
 		var client, server echo.Instance
 		testNs := namespace.NewOrFail(t, t, namespace.Config{
@@ -160,7 +161,6 @@ global:
 			BuildOrFail(t)
 
 		sanitycheck.RunTrafficTestClientServer(t, client, server)
-		return nil
 	}
 
 	verifyInstallation := func(ctx framework.TestContext, cs cluster.Cluster, verifyGateway bool, systemNamespace string) {
