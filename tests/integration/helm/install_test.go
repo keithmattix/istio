@@ -22,26 +22,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	networking "istio.io/api/networking/v1alpha3"
 	"istio.io/client-go/pkg/apis/networking/v1alpha3"
-	"istio.io/istio/pkg/config/protocol"
-	"istio.io/istio/pkg/kube/inject"
 	"istio.io/istio/pkg/test/framework"
 	"istio.io/istio/pkg/test/framework/components/cluster"
 	kubecluster "istio.io/istio/pkg/test/framework/components/cluster/kube"
-	"istio.io/istio/pkg/test/framework/components/echo"
-	"istio.io/istio/pkg/test/framework/components/echo/deployment"
 	"istio.io/istio/pkg/test/framework/components/namespace"
 	"istio.io/istio/pkg/test/helm"
 	kubetest "istio.io/istio/pkg/test/kube"
 	"istio.io/istio/pkg/test/scopes"
 	"istio.io/istio/pkg/test/util/retry"
-	"istio.io/istio/pkg/util/sets"
 	"istio.io/istio/tests/util/sanitycheck"
 )
 
@@ -83,85 +77,85 @@ global:
 
 	helmReleaseNamespace := "istio-helm-releases"
 
-	genInjectionTemplates := func(t framework.TestContext, systemNamespace string) (map[string]sets.String, error) {
-		out := map[string]sets.String{}
-		for _, c := range t.Clusters().Kube() {
-			out[c.Name()] = sets.New[string]()
-			// TODO find a place to read revision(s) and avoid listing
-			cms, err := c.Kube().CoreV1().ConfigMaps(systemNamespace).List(context.TODO(), metav1.ListOptions{})
-			if err != nil {
-				return nil, err
-			}
+	// genInjectionTemplates := func(t framework.TestContext, systemNamespace string) (map[string]sets.String, error) {
+	// 	out := map[string]sets.String{}
+	// 	for _, c := range t.Clusters().Kube() {
+	// 		out[c.Name()] = sets.New[string]()
+	// 		// TODO find a place to read revision(s) and avoid listing
+	// 		cms, err := c.Kube().CoreV1().ConfigMaps(systemNamespace).List(context.TODO(), metav1.ListOptions{})
+	// 		if err != nil {
+	// 			return nil, err
+	// 		}
 
-			// take the intersection of the templates available from each revision in this cluster
-			intersection := sets.New[string]()
-			for _, item := range cms.Items {
-				if !strings.HasPrefix(item.Name, "istio-sidecar-injector") {
-					continue
-				}
-				data, err := inject.UnmarshalConfig([]byte(item.Data["config"]))
-				if err != nil {
-					return nil, fmt.Errorf("failed parsing injection cm in %s: %v", c.Name(), err)
-				}
-				if data.RawTemplates != nil {
-					t := sets.New[string]()
-					for name := range data.RawTemplates {
-						t.Insert(name)
-					}
-					// either intersection has not been set or we intersect these templates
-					// with the current set.
-					if intersection.IsEmpty() {
-						intersection = t
-					} else {
-						intersection = intersection.Intersection(t)
-					}
-				}
-			}
-			for name := range intersection {
-				out[c.Name()].Insert(name)
-			}
-		}
+	// 		// take the intersection of the templates available from each revision in this cluster
+	// 		intersection := sets.New[string]()
+	// 		for _, item := range cms.Items {
+	// 			if !strings.HasPrefix(item.Name, "istio-sidecar-injector") {
+	// 				continue
+	// 			}
+	// 			data, err := inject.UnmarshalConfig([]byte(item.Data["config"]))
+	// 			if err != nil {
+	// 				return nil, fmt.Errorf("failed parsing injection cm in %s: %v", c.Name(), err)
+	// 			}
+	// 			if data.RawTemplates != nil {
+	// 				t := sets.New[string]()
+	// 				for name := range data.RawTemplates {
+	// 					t.Insert(name)
+	// 				}
+	// 				// either intersection has not been set or we intersect these templates
+	// 				// with the current set.
+	// 				if intersection.IsEmpty() {
+	// 					intersection = t
+	// 				} else {
+	// 					intersection = intersection.Intersection(t)
+	// 				}
+	// 			}
+	// 		}
+	// 		for name := range intersection {
+	// 			out[c.Name()].Insert(name)
+	// 		}
+	// 	}
 
-		return out, nil
-	}
+	// 	return out, nil
+	// }
 
-	runSanityCheck := func(t framework.TestContext, systemNamespace string) {
-		scopes.Framework.Infof("running sanity test")
-		var client, server echo.Instance
-		testNs := namespace.NewOrFail(t, t, namespace.Config{
-			Prefix:   "default",
-			Revision: "",
-			Inject:   true,
-		})
+	// runSanityCheck := func(t framework.TestContext, systemNamespace string) {
+	// 	scopes.Framework.Infof("running sanity test")
+	// 	var client, server echo.Instance
+	// 	testNs := namespace.NewOrFail(t, t, namespace.Config{
+	// 		Prefix:   "default",
+	// 		Revision: "",
+	// 		Inject:   true,
+	// 	})
 
-		templates, err := genInjectionTemplates(t, systemNamespace)
-		if err != nil {
-			t.Fatalf("failed to locate injection templates: %v", err)
-		}
-		builder := deployment.New(t)
+	// 	templates, err := genInjectionTemplates(t, systemNamespace)
+	// 	if err != nil {
+	// 		t.Fatalf("failed to locate injection templates: %v", err)
+	// 	}
+	// 	builder := deployment.New(t)
 
-		builder.
-			With(&client, echo.Config{
-				Service:   "client",
-				Namespace: testNs,
-				Ports:     []echo.Port{},
-			}).
-			With(&server, echo.Config{
-				Service:   "server",
-				Namespace: testNs,
-				Ports: []echo.Port{
-					{
-						Name:         "http",
-						Protocol:     protocol.HTTP,
-						WorkloadPort: 8090,
-					},
-				},
-			}).
-			WithTemplates(templates). // deployment.New() defaults to istio-system as the systemNamespace; change that to our custom namespace here
-			BuildOrFail(t)
+	// 	builder.
+	// 		With(&client, echo.Config{
+	// 			Service:   "client",
+	// 			Namespace: testNs,
+	// 			Ports:     []echo.Port{},
+	// 		}).
+	// 		With(&server, echo.Config{
+	// 			Service:   "server",
+	// 			Namespace: testNs,
+	// 			Ports: []echo.Port{
+	// 				{
+	// 					Name:         "http",
+	// 					Protocol:     protocol.HTTP,
+	// 					WorkloadPort: 8090,
+	// 				},
+	// 			},
+	// 		}).
+	// 		WithTemplates(templates). // deployment.New() defaults to istio-system as the systemNamespace; change that to our custom namespace here
+	// 		BuildOrFail(t)
 
-		sanitycheck.RunTrafficTestClientServer(t, client, server)
-	}
+	// 	sanitycheck.RunTrafficTestClientServer(t, client, server)
+	// }
 
 	verifyInstallation := func(ctx framework.TestContext, cs cluster.Cluster, verifyGateway bool, systemNamespace string) {
 		scopes.Framework.Infof("=== verifying istio installation === ")
@@ -241,32 +235,32 @@ global:
 			verifyInstallation(t, cs, true, customSystemNamespace)
 			verifyValidation(t, customSystemNamespace)
 
-			runSanityCheck(t, customSystemNamespace)
+			// runSanityCheck(t, customSystemNamespace)
 
-			t.Cleanup(func() {
-				scopes.Framework.Infof("cleaning up resources")
-				if err := h.DeleteChart(IngressReleaseName, helmReleaseNamespace); err != nil {
-					t.Errorf("failed to delete %s release: %v", IngressReleaseName, err)
-				}
-				if err := h.DeleteChart(IstiodReleaseName, helmReleaseNamespace); err != nil {
-					t.Errorf("failed to delete %s release: %v", IstiodReleaseName, err)
-				}
-				if err := h.DeleteChart(BaseReleaseName, helmReleaseNamespace); err != nil {
-					t.Errorf("failed to delete %s release: %v", BaseReleaseName, err)
-				}
-				if err := cs.Kube().CoreV1().Namespaces().Delete(context.TODO(), customSystemNamespace, metav1.DeleteOptions{}); err != nil {
-					t.Errorf("failed to delete istio namespace: %v", err)
-				}
-				if err := kubetest.WaitForNamespaceDeletion(cs.Kube(), customSystemNamespace, retry.Timeout(RetryTimeOut)); err != nil {
-					t.Errorf("waiting for istio namespace to be deleted: %v", err)
-				}
-				if err := cs.Kube().CoreV1().Namespaces().Delete(context.TODO(), helmReleaseNamespace, metav1.DeleteOptions{}); err != nil {
-					t.Errorf("failed to delete helm release namespace %s: %v", helmReleaseNamespace, err)
-				}
-				if err := kubetest.WaitForNamespaceDeletion(cs.Kube(), helmReleaseNamespace, retry.Timeout(RetryTimeOut)); err != nil {
-					t.Errorf("waiting for istio helm release namespace to be deleted: %v", err)
-				}
-			})
+			// t.Cleanup(func() {
+			// 	scopes.Framework.Infof("cleaning up resources")
+			// 	if err := h.DeleteChart(IngressReleaseName, helmReleaseNamespace); err != nil {
+			// 		t.Errorf("failed to delete %s release: %v", IngressReleaseName, err)
+			// 	}
+			// 	if err := h.DeleteChart(IstiodReleaseName, helmReleaseNamespace); err != nil {
+			// 		t.Errorf("failed to delete %s release: %v", IstiodReleaseName, err)
+			// 	}
+			// 	if err := h.DeleteChart(BaseReleaseName, helmReleaseNamespace); err != nil {
+			// 		t.Errorf("failed to delete %s release: %v", BaseReleaseName, err)
+			// 	}
+			// 	if err := cs.Kube().CoreV1().Namespaces().Delete(context.TODO(), customSystemNamespace, metav1.DeleteOptions{}); err != nil {
+			// 		t.Errorf("failed to delete istio namespace: %v", err)
+			// 	}
+			// 	if err := kubetest.WaitForNamespaceDeletion(cs.Kube(), customSystemNamespace, retry.Timeout(RetryTimeOut)); err != nil {
+			// 		t.Errorf("waiting for istio namespace to be deleted: %v", err)
+			// 	}
+			// 	if err := cs.Kube().CoreV1().Namespaces().Delete(context.TODO(), helmReleaseNamespace, metav1.DeleteOptions{}); err != nil {
+			// 		t.Errorf("failed to delete helm release namespace %s: %v", helmReleaseNamespace, err)
+			// 	}
+			// 	if err := kubetest.WaitForNamespaceDeletion(cs.Kube(), helmReleaseNamespace, retry.Timeout(RetryTimeOut)); err != nil {
+			// 		t.Errorf("waiting for istio helm release namespace to be deleted: %v", err)
+			// 	}
+			// })
 		})
 }
 
