@@ -131,6 +131,6 @@ ifeq (${JOB_TYPE},postsubmit)
 else
 	$(RUN_TEST) ./tests/integration/security/ ./tests/integration/pilot -timeout 30m \
 	${_INTEGRATION_TEST_FLAGS} ${_INTEGRATION_TEST_SELECT_FLAGS} \
-	--test.run="TestTraffic" \
+	--test.run="TestReachability|TestTraffic" \
 	2>&1 | tee >($(JUNIT_REPORT) > $(JUNIT_OUT))
 endif

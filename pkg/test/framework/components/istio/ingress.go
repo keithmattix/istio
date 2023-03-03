@@ -41,7 +41,7 @@ import (
 const (
 	defaultIngressIstioNameLabel = "ingressgateway"
 	defaultIngressIstioLabel     = "istio=" + defaultIngressIstioNameLabel
-	defaultIngressServiceName    = "istio-ingress"
+	defaultIngressServiceName    = "istio-" + defaultIngressIstioNameLabel
 
 	discoveryPort = 15012
 )
