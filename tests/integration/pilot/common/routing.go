@@ -80,14 +80,18 @@ spec:
 ---
 `
 
-func httpVirtualService(gateway, host string, port int) string {
+func httpVirtualService(gateway, host string, port int, gatewayIstioLabel string) string {
+	if gatewayIstioLabel == "" {
+		gatewayIstioLabel = "ingressgateway"
+	}
 	return tmpl.MustEvaluate(httpVirtualServiceTmpl, struct {
 		Gateway            string
 		VirtualServiceHost string
 		DestinationHost    string
 		Port               int
 		MatchScheme        string
-	}{gateway, host, "", port, ""})
+		GatewayIstioLabel  string
+	}{gateway, host, "", port, "", gatewayIstioLabel})
 }
 
 const gatewayTmpl = `
@@ -97,7 +101,7 @@ metadata:
   name: gateway
 spec:
   selector:
-    istio: ingressgateway
+    istio: {{.GatewayIstioLabel | default "ingressgateway"}}
   servers:
   - port:
       number: {{.GatewayPort}}
@@ -992,10 +996,10 @@ apiVersion: networking.istio.io/v1alpha3
 kind: Gateway
 metadata:
   name: cross-network-gateway-test
-  namespace: istio-system
+  namespace: {{.SystemNamespace}}
 spec:
   selector:
-    istio: ingressgateway
+    istio: {{.GatewayIstioLabel | default "ingressgateway"}}
   servers:
     - port:
         number: 443
@@ -1007,6 +1011,16 @@ spec:
         - "*.local"
 `,
 			children: childs,
+			templateVars: func(_ echo.Callers, dests echo.Instances) map[string]any {
+				systemNamespace := "istio-system"
+				if t.Istio.Settings().SystemNamespace != "" {
+					systemNamespace = t.Istio.Settings().SystemNamespace
+				}
+				return map[string]any{
+					"SystemNamespace":   systemNamespace,
+					"GatewayIstioLabel": t.Istio.Settings().IngressGatewayIstioLabel,
+				}
+			},
 		})
 	}
 }
@@ -1076,7 +1090,7 @@ metadata:
   name: gateway
 spec:
   selector:
-    istio: ingressgateway
+    istio: {{.GatewayIstioLabel | default "ingressgateway"}}
   servers:
   - port:
       number: 80
@@ -1095,6 +1109,11 @@ spec:
 			},
 			Check: check.Status(http.StatusMovedPermanently),
 		},
+		templateVars: func(src echo.Callers, dest echo.Instances) map[string]any {
+			return map[string]any{
+				"GatewayIstioLabel": t.Istio.Settings().IngressGatewayIstioLabel,
+			}
+		},
 		setupOpts: fqdnHostHeader,
 	})
 	t.RunTraffic(TrafficTestCase{
@@ -1109,7 +1128,7 @@ metadata:
   name: gateway
 spec:
   selector:
-    istio: ingressgateway
+    istio: {{.GatewayIstioLabel | default "ingressgateway"}}
   servers:
   - port:
       number: 80
@@ -1124,7 +1143,7 @@ apiVersion: networking.istio.io/v1alpha3
 kind: EnvoyFilter
 metadata:
   name: ingressgateway-redirect-config
-  namespace: istio-system
+  namespace: {{.SystemNamespace}}
 spec:
   configPatches:
   - applyTo: NETWORK_FILTER
@@ -1143,7 +1162,7 @@ spec:
           normalize_path: true
   workloadSelector:
     labels:
-      istio: ingressgateway
+      istio: {{.GatewayIstioLabel | default "ingressgateway"}}
 ---
 ` + httpVirtualServiceTmpl,
 		opts: echo.CallOptions{
@@ -1160,10 +1179,16 @@ spec:
 		setupOpts: fqdnHostHeader,
 		templateVars: func(_ echo.Callers, dests echo.Instances) map[string]any {
 			dest := dests[0]
+			systemNamespace := "istio-system"
+			if t.Istio.Settings().SystemNamespace != "" {
+				systemNamespace = t.Istio.Settings().SystemNamespace
+			}
 			return map[string]any{
 				"Gateway":            "gateway",
 				"VirtualServiceHost": dest.Config().ClusterLocalFQDN(),
 				"Port":               dest.PortForName("http").ServicePort,
+				"SystemNamespace":    systemNamespace,
+				"GatewayIstioLabel":  t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 	})
@@ -1198,7 +1223,7 @@ metadata:
   name: gateway
 spec:
   selector:
-    istio: ingressgateway
+    istio: {{.GatewayIstioLabel | default "ingressgateway"}}
   servers:
   - port:
       number: 80
@@ -1224,6 +1249,7 @@ spec:
 				"Gateway":            "gateway",
 				"VirtualServiceHost": dest.Config().ClusterLocalFQDN(),
 				"Port":               443,
+				"GatewayIstioLabel":  t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 	})
@@ -1240,7 +1266,7 @@ metadata:
   name: gateway
 spec:
   selector:
-    istio: ingressgateway
+    istio: {{.GatewayIstioLabel | default "ingressgateway"}}
   servers:
   - port:
       number: 80
@@ -1255,7 +1281,7 @@ apiVersion: networking.istio.io/v1alpha3
 kind: EnvoyFilter
 metadata:
   name: ingressgateway-redirect-config
-  namespace: istio-system
+  namespace: {{.SystemNamespace}}
 spec:
   configPatches:
   - applyTo: NETWORK_FILTER
@@ -1274,7 +1300,7 @@ spec:
           normalize_path: true
   workloadSelector:
     labels:
-      istio: ingressgateway
+      istio: {{.GatewayIstioLabel | default "ingressgateway"}}
 ---
 ` + httpVirtualServiceTmpl,
 		opts: echo.CallOptions{
@@ -1290,11 +1316,17 @@ spec:
 		},
 		setupOpts: fqdnHostHeader,
 		templateVars: func(_ echo.Callers, dests echo.Instances) map[string]any {
+			systemNamespace := "istio-system"
+			if t.Istio.Settings().SystemNamespace != "" {
+				systemNamespace = t.Istio.Settings().SystemNamespace
+			}
 			dest := dests[0]
 			return map[string]any{
 				"Gateway":            "gateway",
 				"VirtualServiceHost": dest.Config().ClusterLocalFQDN(),
 				"Port":               443,
+				"SystemNamespace":    systemNamespace,
+				"GatewayIstioLabel":  t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 	})
@@ -1310,7 +1342,7 @@ metadata:
   name: gateway
 spec:
   selector:
-    istio: ingressgateway
+    istio: {{.GatewayIstioLabel | default "ingressgateway"}}
   servers:
   - port:
       number: 80
@@ -1336,6 +1368,7 @@ spec:
 				"Gateway":            "gateway",
 				"VirtualServiceHost": dest.Config().ClusterLocalFQDN(),
 				"Port":               ports.All().MustForName("auto-http").ServicePort,
+				"GatewayIstioLabel":  t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 	})
@@ -1351,7 +1384,7 @@ metadata:
   name: gateway
 spec:
   selector:
-    istio: ingressgateway
+    istio: {{.GatewayIstioLabel | default "ingressgateway"}}
   servers:
   - port:
       number: 80
@@ -1379,10 +1412,17 @@ spec:
 		setupOpts: fqdnHostHeader,
 		templateVars: func(_ echo.Callers, dests echo.Instances) map[string]any {
 			dest := dests[0]
+			systemNamespace := "istio-system"
+			if t.Istio.Settings().SystemNamespace != "" {
+				systemNamespace = t.Istio.Settings().SystemNamespace
+			}
+
 			return map[string]any{
 				"Gateway":            "gateway",
 				"VirtualServiceHost": dest.Config().ClusterLocalFQDN(),
 				"Port":               ports.All().MustForName("auto-http").ServicePort,
+				"SystemNamespace":    systemNamespace,
+				"GatewayIstioLabel":  t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 	})
@@ -1397,7 +1437,7 @@ metadata:
   name: gateway
 spec:
   selector:
-    istio: ingressgateway
+    istio: {{.GatewayIstioLabel | default "ingressgateway"}}
   servers:
   - port:
       number: 80
@@ -1454,11 +1494,13 @@ spec:
 		minIstioVersion: "1.15.0",
 		setupOpts:       noTarget,
 		templateVars: func(_ echo.Callers, dests echo.Instances) map[string]any {
+
 			return map[string]any{
 				"Gateway":            "gateway",
 				"VirtualServiceHost": "*.example.com",
 				"DestinationHost":    dests[0].Config().ClusterLocalFQDN(),
 				"Port":               ports.All().MustForName(ports.HTTP).ServicePort,
+				"GatewayIstioLabel":  t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 	})
@@ -1485,7 +1527,7 @@ metadata:
   name: gateway
 spec:
   selector:
-    istio: ingressgateway
+    istio: {{.GatewayIstioLabel | default "ingressgateway"}}
   servers:
   - port:
       number: 80
@@ -1517,6 +1559,7 @@ spec:
 						"Gateway":            "gateway",
 						"VirtualServiceHost": dest.Config().ClusterLocalFQDN(),
 						"Port":               ports.All().MustForName(port).ServicePort,
+						"GatewayIstioLabel":  t.Istio.Settings().IngressGatewayIstioLabel,
 					}
 				},
 			})
@@ -1572,7 +1615,6 @@ spec:
 
 func XFFGatewayCase(apps *deployment.SingleNamespaceView, gateway string) []TrafficTestCase {
 	var cases []TrafficTestCase
-
 	destinationSets := []echo.Instances{
 		apps.A,
 	}
@@ -1585,7 +1627,7 @@ func XFFGatewayCase(apps *deployment.SingleNamespaceView, gateway string) []Traf
 		fqdn := d[0].Config().ClusterLocalFQDN()
 		cases = append(cases, TrafficTestCase{
 			name:   d[0].Config().Service,
-			config: httpGateway("*") + httpVirtualService("gateway", fqdn, d[0].PortForName("http").ServicePort),
+			config: httpGateway("*") + httpVirtualService("gateway", fqdn, d[0].PortForName("http").ServicePort, "ingressgateway"), // so far, this test creates its own gateway with this label
 			call:   apps.Naked[0].CallOrFail,
 			opts: echo.CallOptions{
 				Count:   1,
@@ -2913,7 +2955,7 @@ metadata:
   name: gateway
 spec:
   selector:
-    istio: ingressgateway
+    istio: {{.GatewayIstioLabel | default "ingressgateway"}}
   servers:
   - port:
       number: 80
@@ -2959,7 +3001,7 @@ apiVersion: security.istio.io/v1beta1
 kind: RequestAuthentication
 metadata:
   name: default
-  namespace: istio-system
+  namespace: {{.SystemNamespace}}
 spec:
   jwtRules:
   - issuer: "test-issuer-1@istio.io"
@@ -3009,8 +3051,15 @@ spec:
 		viaIngress:       true,
 		config:           configAll,
 		templateVars: func(src echo.Callers, dest echo.Instances) map[string]any {
+			systemNamespace := "istio-system"
+			if t.Istio.Settings().SystemNamespace != "" {
+				systemNamespace = t.Istio.Settings().SystemNamespace
+			}
+
 			return map[string]any{
-				"Headers": []configData{{"X-Jwt-Nested-Key", "exact", "valueC"}},
+				"Headers":           []configData{{"X-Jwt-Nested-Key", "exact", "valueC"}},
+				"SystemNamespace":   systemNamespace,
+				"GatewayIstioLabel": t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 		opts: echo.CallOptions{
@@ -3032,11 +3081,18 @@ spec:
 		viaIngress:       true,
 		config:           configAll,
 		templateVars: func(src echo.Callers, dest echo.Instances) map[string]any {
+			systemNamespace := "istio-system"
+			if t.Istio.Settings().SystemNamespace != "" {
+				systemNamespace = t.Istio.Settings().SystemNamespace
+			}
+
 			return map[string]any{
 				"Headers": []configData{
 					{"X-Jwt-Nested-Key", "exact", "valueC"},
 					{"X-Jwt-Iss", "exact", "test-issuer-1@istio.io"},
 				},
+				"SystemNamespace":   systemNamespace,
+				"GatewayIstioLabel": t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 		opts: echo.CallOptions{
@@ -3058,8 +3114,15 @@ spec:
 		viaIngress:       true,
 		config:           configAll,
 		templateVars: func(src echo.Callers, dest echo.Instances) map[string]any {
+			systemNamespace := "istio-system"
+			if t.Istio.Settings().SystemNamespace != "" {
+				systemNamespace = t.Istio.Settings().SystemNamespace
+			}
+
 			return map[string]any{
-				"Headers": []configData{{"x-jwt-wrong-header", "exact", "header_to_be_deleted"}},
+				"Headers":           []configData{{"x-jwt-wrong-header", "exact", "header_to_be_deleted"}},
+				"SystemNamespace":   systemNamespace,
+				"GatewayIstioLabel": t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 		opts: echo.CallOptions{
@@ -3081,8 +3144,15 @@ spec:
 		viaIngress:       true,
 		config:           configAll,
 		templateVars: func(src echo.Callers, dest echo.Instances) map[string]any {
+			systemNamespace := "istio-system"
+			if t.Istio.Settings().SystemNamespace != "" {
+				systemNamespace = t.Istio.Settings().SystemNamespace
+			}
+
 			return map[string]any{
-				"Headers": []configData{{"@request.auth.claims.nested.key1", "exact", "valueA"}},
+				"Headers":           []configData{{"@request.auth.claims.nested.key1", "exact", "valueA"}},
+				"SystemNamespace":   systemNamespace,
+				"GatewayIstioLabel": t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 		opts: echo.CallOptions{
@@ -3104,8 +3174,15 @@ spec:
 		viaIngress:       true,
 		config:           configAll,
 		templateVars: func(src echo.Callers, dest echo.Instances) map[string]any {
+			systemNamespace := "istio-system"
+			if t.Istio.Settings().SystemNamespace != "" {
+				systemNamespace = t.Istio.Settings().SystemNamespace
+			}
+
 			return map[string]any{
-				"Headers": []configData{{"@request.auth.claims.sub", "prefix", "sub"}},
+				"Headers":           []configData{{"@request.auth.claims.sub", "prefix", "sub"}},
+				"SystemNamespace":   systemNamespace,
+				"GatewayIstioLabel": t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 		opts: echo.CallOptions{
@@ -3127,11 +3204,18 @@ spec:
 		viaIngress:       true,
 		config:           configAll,
 		templateVars: func(src echo.Callers, dest echo.Instances) map[string]any {
+			systemNamespace := "istio-system"
+			if t.Istio.Settings().SystemNamespace != "" {
+				systemNamespace = t.Istio.Settings().SystemNamespace
+			}
+
 			return map[string]any{
 				"Headers": []configData{
 					{"@request.auth.claims.sub", "regex", "(\\W|^)(sub-1|sub-2)(\\W|$)"},
 					{"@request.auth.claims.nested.key1", "regex", "(\\W|^)value[AB](\\W|$)"},
 				},
+				"SystemNamespace":   systemNamespace,
+				"GatewayIstioLabel": t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 		opts: echo.CallOptions{
@@ -3153,11 +3237,18 @@ spec:
 		viaIngress:       true,
 		config:           configAll,
 		templateVars: func(src echo.Callers, dest echo.Instances) map[string]any {
+			systemNamespace := "istio-system"
+			if t.Istio.Settings().SystemNamespace != "" {
+				systemNamespace = t.Istio.Settings().SystemNamespace
+			}
+
 			return map[string]any{
 				"Headers": []configData{
 					{"@request.auth.claims.nested.key1", "exact", "valueA"},
 					{"@request.auth.claims.sub", "prefix", "sub"},
 				},
+				"SystemNamespace":   systemNamespace,
+				"GatewayIstioLabel": t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 		opts: echo.CallOptions{
@@ -3179,8 +3270,15 @@ spec:
 		viaIngress:       true,
 		config:           configAll,
 		templateVars: func(src echo.Callers, dest echo.Instances) map[string]any {
+			systemNamespace := "istio-system"
+			if t.Istio.Settings().SystemNamespace != "" {
+				systemNamespace = t.Istio.Settings().SystemNamespace
+			}
+
 			return map[string]any{
-				"WithoutHeaders": []configData{{"@request.auth.claims.nested.key1", "exact", "value-not-matched"}},
+				"WithoutHeaders":    []configData{{"@request.auth.claims.nested.key1", "exact", "value-not-matched"}},
+				"SystemNamespace":   systemNamespace,
+				"GatewayIstioLabel": t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 		opts: echo.CallOptions{
@@ -3202,8 +3300,15 @@ spec:
 		viaIngress:       true,
 		config:           configAll,
 		templateVars: func(src echo.Callers, dest echo.Instances) map[string]any {
+			systemNamespace := "istio-system"
+			if t.Istio.Settings().SystemNamespace != "" {
+				systemNamespace = t.Istio.Settings().SystemNamespace
+			}
+
 			return map[string]any{
-				"WithoutHeaders": []configData{{"@request.auth.claims.nested.key1", "exact", "valueA"}},
+				"WithoutHeaders":    []configData{{"@request.auth.claims.nested.key1", "exact", "valueA"}},
+				"SystemNamespace":   systemNamespace,
+				"GatewayIstioLabel": t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 		opts: echo.CallOptions{
@@ -3225,12 +3330,19 @@ spec:
 		viaIngress:       true,
 		config:           configAll,
 		templateVars: func(src echo.Callers, dest echo.Instances) map[string]any {
+			systemNamespace := "istio-system"
+			if t.Istio.Settings().SystemNamespace != "" {
+				systemNamespace = t.Istio.Settings().SystemNamespace
+			}
+
 			return map[string]any{
 				"Headers": []configData{{"@request.auth.claims.sub", "prefix", "sub"}},
 				"WithoutHeaders": []configData{
 					{"@request.auth.claims.nested.key1", "exact", "value-not-matched"},
 					{"@request.auth.claims.nested.key1", "regex", "(\\W|^)value\\s{0,3}not{0,1}\\s{0,3}matched(\\W|$)"},
 				},
+				"SystemNamespace":   systemNamespace,
+				"GatewayIstioLabel": t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 		opts: echo.CallOptions{
@@ -3252,11 +3364,18 @@ spec:
 		viaIngress:       true,
 		config:           configAll,
 		templateVars: func(src echo.Callers, dest echo.Instances) map[string]any {
+			systemNamespace := "istio-system"
+			if t.Istio.Settings().SystemNamespace != "" {
+				systemNamespace = t.Istio.Settings().SystemNamespace
+			}
+
 			return map[string]any{
 				"Headers": []configData{
 					{"@request.auth.claims.nested.key1", "exact", "valueA"},
 					{"@request.auth.claims.sub", "prefix", "value-not-matched"},
 				},
+				"SystemNamespace":   systemNamespace,
+				"GatewayIstioLabel": t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 		opts: echo.CallOptions{
@@ -3278,8 +3397,15 @@ spec:
 		viaIngress:       true,
 		config:           configAll,
 		templateVars: func(src echo.Callers, dest echo.Instances) map[string]any {
+			systemNamespace := "istio-system"
+			if t.Istio.Settings().SystemNamespace != "" {
+				systemNamespace = t.Istio.Settings().SystemNamespace
+			}
+
 			return map[string]any{
-				"Headers": []configData{{"@request.auth.claims.sub", "exact", "value-not-matched"}},
+				"Headers":           []configData{{"@request.auth.claims.sub", "exact", "value-not-matched"}},
+				"SystemNamespace":   systemNamespace,
+				"GatewayIstioLabel": t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 		opts: echo.CallOptions{
@@ -3301,8 +3427,15 @@ spec:
 		viaIngress:       true,
 		config:           configAll,
 		templateVars: func(src echo.Callers, dest echo.Instances) map[string]any {
+			systemNamespace := "istio-system"
+			if t.Istio.Settings().SystemNamespace != "" {
+				systemNamespace = t.Istio.Settings().SystemNamespace
+			}
+
 			return map[string]any{
-				"Headers": []configData{{"@request.auth.claims.nested.key1", "exact", "valueA"}},
+				"Headers":           []configData{{"@request.auth.claims.nested.key1", "exact", "valueA"}},
+				"SystemNamespace":   systemNamespace,
+				"GatewayIstioLabel": t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 		opts: echo.CallOptions{
@@ -3324,8 +3457,15 @@ spec:
 		viaIngress:       true,
 		config:           configAll,
 		templateVars: func(src echo.Callers, dest echo.Instances) map[string]any {
+			systemNamespace := "istio-system"
+			if t.Istio.Settings().SystemNamespace != "" {
+				systemNamespace = t.Istio.Settings().SystemNamespace
+			}
+
 			return map[string]any{
-				"Headers": []configData{{"@request.auth.claims.nested.key1", "exact", "valueA"}},
+				"Headers":           []configData{{"@request.auth.claims.nested.key1", "exact", "valueA"}},
+				"SystemNamespace":   systemNamespace,
+				"GatewayIstioLabel": t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 		opts: echo.CallOptions{
@@ -3347,8 +3487,15 @@ spec:
 		viaIngress:       true,
 		config:           configAll,
 		templateVars: func(src echo.Callers, dest echo.Instances) map[string]any {
+			systemNamespace := "istio-system"
+			if t.Istio.Settings().SystemNamespace != "" {
+				systemNamespace = t.Istio.Settings().SystemNamespace
+			}
+
 			return map[string]any{
-				"Headers": []configData{{"@request.auth.claims.nested.key1", "exact", "valueA"}},
+				"Headers":           []configData{{"@request.auth.claims.nested.key1", "exact", "valueA"}},
+				"SystemNamespace":   systemNamespace,
+				"GatewayIstioLabel": t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 		opts: echo.CallOptions{
@@ -3371,8 +3518,15 @@ spec:
 		viaIngress:       true,
 		config:           configRoute,
 		templateVars: func(src echo.Callers, dest echo.Instances) map[string]any {
+			systemNamespace := "istio-system"
+			if t.Istio.Settings().SystemNamespace != "" {
+				systemNamespace = t.Istio.Settings().SystemNamespace
+			}
+
 			return map[string]any{
-				"Headers": []configData{{"@request.auth.claims.nested.key1", "exact", "valueA"}},
+				"Headers":           []configData{{"@request.auth.claims.nested.key1", "exact", "valueA"}},
+				"SystemNamespace":   systemNamespace,
+				"GatewayIstioLabel": t.Istio.Settings().IngressGatewayIstioLabel,
 			}
 		},
 		opts: echo.CallOptions{

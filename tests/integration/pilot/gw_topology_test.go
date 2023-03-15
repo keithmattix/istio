@@ -24,6 +24,7 @@ import (
 
 	"istio.io/istio/pkg/test/framework"
 	kubecluster "istio.io/istio/pkg/test/framework/components/cluster/kube"
+	"istio.io/istio/pkg/test/framework/components/istio"
 	"istio.io/istio/pkg/test/framework/components/namespace"
 	kubetest "istio.io/istio/pkg/test/kube"
 	"istio.io/istio/pkg/test/util/retry"
@@ -35,6 +36,7 @@ func TestXFFGateway(t *testing.T) {
 		NewTest(t).
 		Features("traffic.ingress.topology").
 		Run(func(t framework.TestContext) {
+			istio.Setup(&i, nil)
 			gatewayNs := namespace.NewOrFail(t, t, namespace.Config{Prefix: "custom-gateway"})
 			injectLabel := `sidecar.istio.io/inject: "true"`
 			if len(t.Settings().Revisions.Default()) > 0 {

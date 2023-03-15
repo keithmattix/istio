@@ -16,7 +16,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      istio: ingressgateway
+      istio: {{.GatewayLabel | default "ingressgateway"}}
   rules:
   - to:
     - operation:

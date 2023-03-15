@@ -61,6 +61,7 @@ func TestGateway(t *testing.T) {
 			ingressutil.CreateIngressKubeSecret(t, "test-gateway-cert-cross", ingressutil.TLS, ingressutil.IngressCredentialB,
 				false, t.Clusters().Configs()...)
 
+
 			retry.UntilSuccessOrFail(t, func() error {
 				err := t.ConfigIstio().YAML("", fmt.Sprintf(`
 apiVersion: gateway.networking.k8s.io/v1beta1

@@ -417,6 +417,7 @@ type TestConfig struct {
 	CredentialName string
 	Host           string
 	ServiceName    string
+	GatewayLabel   string
 }
 
 const vsTemplate = `
@@ -447,7 +448,7 @@ metadata:
   name: {{.CredentialName}}
 spec:
   selector:
-    istio: ingressgateway # use istio default ingress gateway
+    istio: {{.GatewayLabel}}
   servers:
   - port:
       number: 443

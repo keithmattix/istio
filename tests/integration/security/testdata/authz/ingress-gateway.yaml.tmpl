@@ -14,7 +14,7 @@ spec:
   action: DENY
   selector:
     matchLabels:
-      app: istio-ingressgateway
+      app: {{.GatewayIstioLabel | default "istio-ingressgateway"}}
   rules:
     - to:
         - operation:
@@ -56,7 +56,7 @@ metadata:
   namespace: {{ .To.NamespaceName }}
 spec:
   selector:
-    istio: ingressgateway # use istio default ingress gateway
+    istio: {{.GatewayIstioLabel | default "ingressgateway"}}
   servers:
     - port:
         number: 80
