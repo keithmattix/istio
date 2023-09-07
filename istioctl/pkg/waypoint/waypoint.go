@@ -68,11 +68,18 @@ func Cmd(ctx cli.Context) *cobra.Command {
 			},
 			Spec: gateway.GatewaySpec{
 				GatewayClassName: constants.WaypointGatewayClassName,
-				Listeners: []gateway.Listener{{
-					Name:     "mesh",
-					Port:     15008,
-					Protocol: gateway.ProtocolType(protocol.HBONE),
-				}},
+				Listeners: []gateway.Listener{
+					{
+						Name:     "mesh",
+						Port:     15008,
+						Protocol: gateway.ProtocolType(protocol.HBONE),
+					},
+					{
+						Name:     "anonymous",
+						Port:     15008,
+						Protocol: gateway.ProtocolType(protocol.HBONE),
+					},
+				},
 			},
 		}
 		if waypointServiceAccount != "" {

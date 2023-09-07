@@ -59,7 +59,7 @@ func (lb *ListenerBuilder) serviceForHostname(name host.Name) *model.Service {
 func (lb *ListenerBuilder) buildWaypointInbound() []*listener.Listener {
 	listeners := []*listener.Listener{}
 	// We create 3 listeners:
-	// 1. Decapsulation CONNECT listener.
+	// 1. Decapsulation CONNECT listener. Also handles plain TLS HBONE for the hairpinning case.
 	// 2. IP dispatch listener, handling both VIPs and direct pod IPs.
 	// 3. Encapsulation CONNECT listener, originating the tunnel
 	wls, svcs := findWaypointResources(lb.node, lb.push)
