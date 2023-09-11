@@ -45,6 +45,7 @@ var (
 
 func Cmd(ctx cli.Context) *cobra.Command {
 	var waypointServiceAccount string
+	var permissive bool
 	makeGatewayName := func(sa string) string {
 		name := sa
 		if name == "" {
@@ -74,11 +75,6 @@ func Cmd(ctx cli.Context) *cobra.Command {
 						Port:     15008,
 						Protocol: gateway.ProtocolType(protocol.HBONE),
 					},
-					{
-						Name:     "anonymous",
-						Port:     15008,
-						Protocol: gateway.ProtocolType(protocol.HBONE),
-					},
 				},
 			},
 		}
@@ -86,6 +82,13 @@ func Cmd(ctx cli.Context) *cobra.Command {
 			gw.Annotations = map[string]string{
 				constants.WaypointServiceAccount: waypointServiceAccount,
 			}
+		}
+		if permissive {
+			gw.Spec.Listeners = append(gw.Spec.Listeners, gateway.Listener{
+				Name:     "uncaptured",
+				Port:     15006,
+				Protocol: gateway.ProtocolType(protocol.HBONE),
+			})
 		}
 		if revision != "" {
 			gw.Labels = map[string]string{label.IoIstioRev.Name: revision}
@@ -306,6 +309,7 @@ func Cmd(ctx cli.Context) *cobra.Command {
 	waypointCmd.AddCommand(waypointDeleteCmd)
 	waypointCmd.AddCommand(waypointListCmd)
 	waypointCmd.PersistentFlags().StringVarP(&waypointServiceAccount, "service-account", "s", "", "service account to create a waypoint for")
+	waypointCmd.PersistentFlags().BoolVar(&permissive, "permissive", false, "create a permissive waypoint")
 
 	_ = waypointCmd.RegisterFlagCompletionFunc("service-account", func(
 		cmd *cobra.Command, args []string, toComplete string,

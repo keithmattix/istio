@@ -52,17 +52,6 @@ func (b *Builder) ForPort(port uint32) authn.MTLSSettings {
 	return b.applier.InboundMTLSSettings(port, b.proxy, b.trustDomains, authn.NoOverride)
 }
 
-func (b *Builder) ForHBONE() authn.MTLSSettings {
-	if b == nil {
-		return authn.MTLSSettings{
-			Port: model.HBoneInboundListenPort,
-			Mode: model.MTLSDisable,
-		}
-	}
-	// HBONE is always strict
-	return b.applier.InboundMTLSSettings(model.HBoneInboundListenPort, b.proxy, b.trustDomains, model.MTLSStrict)
-}
-
 func (b *Builder) ForPassthrough() []authn.MTLSSettings {
 	if b == nil {
 		return []authn.MTLSSettings{{

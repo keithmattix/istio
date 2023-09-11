@@ -40,4 +40,7 @@ const (
 
 	// HBoneInboundListenPort is the port on which incoming HBone traffic will be captured.
 	HBoneInboundListenPort = 15008
+
+	// HBONEUnauthenticatedInboundListenPort is the port on which incoming plain TLS HBONE traffic will be captured.
+	HBONEUnauthenticatedInboundListenPort = 15006
 )

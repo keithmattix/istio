@@ -221,7 +221,7 @@ func (a *AmbientIndexImpl) extractWorkloadEntrySpec(w *v1alpha3.WorkloadEntry, n
 	if w == nil {
 		return nil
 	}
-	var waypoint *workloadapi.GatewayAddress
+	var waypoint map[model.WaypointAuth]*workloadapi.GatewayAddress
 	if w.Labels[constants.ManagedGatewayLabel] == constants.ManagedGatewayMeshControllerLabel {
 		// Waypoints do not have waypoints
 	} else {
