@@ -223,15 +223,15 @@ func ApplyToCommonTLSContext(tlsContext *tls.CommonTlsContext, proxy *model.Prox
 		CaCertificatePath: proxy.Metadata.TLSServerRootCert,
 	}
 
-	// TODO: if subjectAltName ends with *, create a prefix match as well.
-	// TODO: if user explicitly specifies SANs - should we alter his explicit config by adding all spifee aliases?
-	matchSAN := util.StringToExactMatch(subjectAltNames)
-	if len(trustDomainAliases) > 0 {
-		matchSAN = append(matchSAN, util.StringToPrefixMatch(AppendURIPrefixToTrustDomain(trustDomainAliases))...)
-	}
-
 	// configure server listeners with SDS.
 	if validateClient {
+		// TODO: if subjectAltName ends with *, create a prefix match as well.
+		// TODO: if user explicitly specifies SANs - should we alter their explicit config by adding all spifee aliases?
+		matchSAN := util.StringToExactMatch(subjectAltNames)
+		if len(trustDomainAliases) > 0 {
+			matchSAN = append(matchSAN, util.StringToPrefixMatch(AppendURIPrefixToTrustDomain(trustDomainAliases))...)
+		}
+
 		tlsContext.ValidationContextType = &tls.CommonTlsContext_CombinedValidationContext{
 			CombinedValidationContext: &tls.CommonTlsContext_CombinedCertificateValidationContext{
 				DefaultValidationContext:         &tls.CertificateValidationContext{MatchSubjectAltNames: matchSAN},

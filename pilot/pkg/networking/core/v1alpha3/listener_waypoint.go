@@ -59,13 +59,15 @@ func (lb *ListenerBuilder) serviceForHostname(name host.Name) *model.Service {
 func (lb *ListenerBuilder) buildWaypointInbound() []*listener.Listener {
 	listeners := []*listener.Listener{}
 	// We create 3 listeners:
-	// 1. Decapsulation CONNECT listener. Also handles plain TLS HBONE for the hairpinning case.
-	// 2. IP dispatch listener, handling both VIPs and direct pod IPs.
-	// 3. Encapsulation CONNECT listener, originating the tunnel
+	// 1. Decapsulation CONNECT listener for mTLS.
+	// 2. Decapsulation CONNECT listener for single-leg TLS (for the hairpinning use-case).
+	// 3. IP dispatch listener, handling both VIPs and direct pod IPs.
+	// 4. Encapsulation CONNECT listener, originating the tunnel
 	wls, svcs := findWaypointResources(lb.node, lb.push)
 
 	listeners = append(listeners,
 		lb.buildWaypointInboundConnectTerminate(),
+		lb.buildWaypointInboundSingleTLSTerminate(),
 		lb.buildWaypointInternal(wls, svcs),
 		buildWaypointConnectOriginateListener())
 
@@ -148,7 +150,94 @@ func (lb *ListenerBuilder) buildConnectTerminateListener(routes []*route.Route) 
 			},
 		},
 	}
+	return l
+}
 
+func (lb *ListenerBuilder) buildWaypointInboundSingleTLSTerminate() *listener.Listener {
+	routes := []*route.Route{{
+		Match: &route.RouteMatch{
+			PathSpecifier: &route.RouteMatch_ConnectMatcher_{ConnectMatcher: &route.RouteMatch_ConnectMatcher{}},
+		},
+		Action: &route.Route_Route{Route: &route.RouteAction{
+			UpgradeConfigs: []*route.RouteAction_UpgradeConfig{{
+				UpgradeType:   ConnectUpgradeType,
+				ConnectConfig: &route.RouteAction_UpgradeConfig_ConnectConfig{},
+			}},
+			ClusterSpecifier: &route.RouteAction_Cluster{Cluster: MainInternalName},
+		}},
+		TypedPerFilterConfig: map[string]*any.Any{
+			xdsfilters.ConnectAuthorityFilter.Name: xdsfilters.ConnectAuthorityEnabled,
+		},
+	}}
+	actualWildcard, _ := getActualWildcardAndLocalHost(lb.node)
+	ph := GetProxyHeaders(lb.node, lb.push, istionetworking.ListenerClassSidecarInbound)
+	h := &hcm.HttpConnectionManager{
+		StatPrefix: ConnectTerminate,
+		RouteSpecifier: &hcm.HttpConnectionManager_RouteConfig{
+			RouteConfig: &route.RouteConfiguration{
+				Name: "default",
+				VirtualHosts: []*route.VirtualHost{{
+					Name:    "default",
+					Domains: []string{"*"},
+					Routes:  routes,
+				}},
+			},
+		},
+		ServerName:                 ph.ServerName,
+		ServerHeaderTransformation: ph.ServerHeaderTransformation,
+		GenerateRequestId:          ph.GenerateRequestID,
+		UseRemoteAddress:           proto.BoolFalse,
+	}
+
+	// Protocol settings
+	h.StreamIdleTimeout = istio_route.Notimeout
+	h.UpgradeConfigs = []*hcm.HttpConnectionManager_UpgradeConfig{{
+		UpgradeType: ConnectUpgradeType,
+	}}
+	h.Http2ProtocolOptions = &core.Http2ProtocolOptions{
+		AllowConnect: true,
+		// TODO(https://github.com/istio/istio/issues/43443)
+		// All streams are bound to the same worker. Therefore, we need to limit for better fairness.
+		MaxConcurrentStreams: &wrappers.UInt32Value{Value: 100},
+	}
+
+	// Filters needed to propagate the tunnel metadata to the inner streams.
+	h.HttpFilters = []*hcm.HttpFilter{
+		xdsfilters.ConnectAuthorityFilter,
+		xdsfilters.BuildRouterFilter(xdsfilters.RouterFilterContext{
+			StartChildSpan:       false,
+			SuppressDebugHeaders: ph.SuppressDebugHeaders,
+		}),
+	}
+	ctx := &tls.CommonTlsContext{}
+	security.ApplyToCommonTLSContext(ctx, lb.node, nil, nil, false) // Don't validate client
+	ctx.AlpnProtocols = []string{"h2"}
+	ctx.TlsParams = &tls.TlsParameters{
+		// Ensure TLS 1.3 is used everywhere
+		TlsMaximumProtocolVersion: tls.TlsParameters_TLSv1_3,
+		TlsMinimumProtocolVersion: tls.TlsParameters_TLSv1_3,
+	}
+	l := &listener.Listener{
+		Name:    ConnectTerminate,
+		Address: util.BuildAddress(actualWildcard, model.HBONEUnauthenticatedInboundListenPort),
+		FilterChains: []*listener.FilterChain{
+			{
+				Name: "default",
+				TransportSocket: &core.TransportSocket{
+					Name: "tls",
+					ConfigType: &core.TransportSocket_TypedConfig{TypedConfig: protoconv.MessageToAny(&tls.DownstreamTlsContext{
+						CommonTlsContext: ctx,
+					})},
+				},
+				Filters: []*listener.Filter{
+					{
+						Name:       wellknown.HTTPConnectionManager,
+						ConfigType: &listener.Filter_TypedConfig{TypedConfig: protoconv.MessageToAny(h)},
+					},
+				},
+			},
+		},
+	}
 	return l
 }
 

@@ -162,9 +162,13 @@ const (
 	ManagedGatewayMeshControllerLabel = "istio.io-mesh-controller"
 	ManagedGatewayMeshController      = "istio.io/mesh-controller"
 
-	RemoteGatewayClassName   = "istio-remote"
-	WaypointGatewayClassName = "istio-waypoint"
-	// TODO formalize this API
+	RemoteGatewayClassName          = "istio-remote"
+	WaypointGatewayClassName        = "istio-waypoint"
+	WaypointMeshListener            = "mesh"
+	WaypointUnauthenticatedListener = "unauthenticated"
+
+	// GatewayNameLabel indicates the gateway managing a particular proxy instances. Only populated for Gateway API gateways
+	// TODO: Formalize this API
 	GatewayNameLabel = "istio.io/gateway-name"
 
 	// TODO formalize this API

@@ -71,7 +71,7 @@ func Cmd(ctx cli.Context) *cobra.Command {
 				GatewayClassName: constants.WaypointGatewayClassName,
 				Listeners: []gateway.Listener{
 					{
-						Name:     "mesh",
+						Name:     constants.WaypointMeshListener,
 						Port:     15008,
 						Protocol: gateway.ProtocolType(protocol.HBONE),
 					},
@@ -85,8 +85,8 @@ func Cmd(ctx cli.Context) *cobra.Command {
 		}
 		if permissive {
 			gw.Spec.Listeners = append(gw.Spec.Listeners, gateway.Listener{
-				Name:     "uncaptured",
-				Port:     15006,
+				Name:     constants.WaypointUnauthenticatedListener,
+				Port:     15003,
 				Protocol: gateway.ProtocolType(protocol.HBONE),
 			})
 		}

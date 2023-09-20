@@ -725,10 +725,15 @@ func (a *AmbientIndexImpl) handleKubeGateway(_, newObj any, isDelete bool, c *Co
 	if gateway.Spec.GatewayClassName == constants.WaypointGatewayClassName && len(gateway.Status.Addresses) > 0 {
 		scope := model.WaypointScope{Namespace: gateway.Namespace, ServiceAccount: gateway.Annotations[constants.WaypointServiceAccount]}
 
-		waypointPort := uint32(15008)
+		waypointMtlsPort := uint32(15008)
+		var permissivePort uint32
 		for _, l := range gateway.Spec.Listeners {
-			if l.Protocol == k8sbeta.ProtocolType(protocol.HBONE) {
-				waypointPort = uint32(l.Port)
+			if l.Protocol == k8sbeta.ProtocolType(protocol.HBONE) && l.Name == constants.WaypointMeshListener {
+				waypointMtlsPort = uint32(l.Port)
+				continue
+			}
+			if l.Protocol == k8sbeta.ProtocolType(protocol.HBONE) && l.Name == constants.WaypointUnauthenticatedListener {
+				permissivePort = uint32(l.Port)
 			}
 		}
 
@@ -745,7 +750,10 @@ func (a *AmbientIndexImpl) handleKubeGateway(_, newObj any, isDelete bool, c *Co
 					Address: ip.AsSlice(),
 				},
 			},
-			HboneMtlsPort: waypointPort,
+			HboneMtlsPort: waypointMtlsPort,
+		}
+		if permissivePort != 0 {
+			addr.HboneSingleTlsPort = permissivePort
 		}
 
 		updates := sets.New[model.ConfigKey]()

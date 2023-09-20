@@ -2028,7 +2028,7 @@ func convertGateways(r configContext) ([]config.Config, map[parentKey][]*parentI
 // configure it in an expected way so that we have consistency and can make changes in the future as needed.
 // We could completely reject but that seems more likely to cause pain.
 func unexpectedWaypointListener(l k8s.Listener) bool {
-	if l.Port != 15008 && l.Port != 15006 {
+	if l.Port != 15008 && l.Port != 15003 {
 		return true
 	}
 	if l.Protocol != k8s.ProtocolType(protocol.HBONE) {
@@ -2280,7 +2280,7 @@ func buildListener(r configContext, obj config.Config, l k8s.Listener, listenerI
 		if unexpectedWaypointListener(l) {
 			listenerConditions[string(k8sbeta.ListenerConditionAccepted)].error = &ConfigError{
 				Reason:  string(k8sbeta.ListenerReasonUnsupportedProtocol),
-				Message: `Expected at most 2 listeners on ports 15006 and 15008 with protocol "HBONE"`,
+				Message: `Expected at most 2 listeners on ports 15003 and 15008 with protocol "HBONE"`,
 			}
 		}
 	}
