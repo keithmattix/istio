@@ -187,4 +187,7 @@ const (
 	AmbientRedirectionEnabled = "enabled"
 	// AmbientRedirectionDisabled is an opt-out, configured by user.
 	AmbientRedirectionDisabled = "disabled"
+
+	// TODO: Formalize this API or make listeners actually mean something for waypoints
+	PermissiveWaypointLabel = "ambient.istio.io/permissive-waypoint"
 )

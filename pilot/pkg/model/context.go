@@ -757,6 +757,11 @@ func (node *Proxy) IsWaypointProxy() bool {
 	return node.Type == Waypoint
 }
 
+// IsPermissiveWaypoint returns true if the proxy is a waypoint and is permissive
+func (node *Proxy) IsPermissiveWaypoint() bool {
+	return node.IsWaypointProxy() && node.Metadata.Labels[constants.PermissiveWaypointLabel] == "true"
+}
+
 // IsZTunnel returns true if the proxy is acting as a ztunnel in an ambient mesh.
 func (node *Proxy) IsZTunnel() bool {
 	return node.Type == Ztunnel

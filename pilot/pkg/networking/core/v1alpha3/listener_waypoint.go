@@ -67,9 +67,12 @@ func (lb *ListenerBuilder) buildWaypointInbound() []*listener.Listener {
 
 	listeners = append(listeners,
 		lb.buildWaypointInboundConnectTerminate(),
-		lb.buildWaypointInboundSingleTLSTerminate(),
 		lb.buildWaypointInternal(wls, svcs),
 		buildWaypointConnectOriginateListener())
+
+	if lb.node.IsPermissiveWaypoint() {
+		listeners = append(listeners, lb.buildWaypointInboundSingleTLSTerminate())
+	}
 
 	return listeners
 }
@@ -217,6 +220,7 @@ func (lb *ListenerBuilder) buildWaypointInboundSingleTLSTerminate() *listener.Li
 		TlsMaximumProtocolVersion: tls.TlsParameters_TLSv1_3,
 		TlsMinimumProtocolVersion: tls.TlsParameters_TLSv1_3,
 	}
+
 	l := &listener.Listener{
 		Name:    ConnectTerminate,
 		Address: util.BuildAddress(actualWildcard, model.HBONEUnauthenticatedInboundListenPort),
