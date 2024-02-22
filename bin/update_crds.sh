@@ -49,12 +49,25 @@ fi
 
 git clone  "https://${REPO}" "${API_TMP}" && cd "${API_TMP}"
 git checkout "${SHA}"
-if [ ! -f "${API_TMP}/kubernetes/customresourcedefinitions.gen.yaml" ]; then
-  echo "Generated Custom Resource Definitions file does not exist in the commit SHA ${SHA}. Not updating the CRD file."
+LEGACY_CRD_BUNDLE_PATH="${API_TMP}/kubernetes/customresourcedefinitions.gen.yaml"
+if [ ! -f "${LEGACY_CRD_BUNDLE_PATH}" ]; then
+  if [ -f "${API_TMP}/kubernetes/legacy.gen.yaml" ]; then
+    LEGACY_CRD_BUNDLE_PATH="${API_TMP}/kubernetes/legacy.gen.yaml"
+  else
+    echo "Generated Legacy Custom Resource Definitions file does not exist in the commit SHA ${SHA}. Not updating the CRD file."
+    exit
+  fi
+fi
+
+if [ ! -f "${API_TMP}/kubernetes/experimental.gen.yaml" ] || [ ! -f "${API_TMP}/kubernetes/standard.gen.yaml" ]; then
+  echo "Generated Experimental and/or Standard Custom Resource Definitions files do not exist in the commit SHA ${SHA}. Not updating the CRD file."
   exit
 fi
-rm -f "${ROOTDIR}/manifests/charts/base/crds/crd-all.gen.yaml"
-cp "${API_TMP}/kubernetes/customresourcedefinitions.gen.yaml" "${ROOTDIR}/manifests/charts/base/crds/crd-all.gen.yaml"
+
+rm -f "${ROOTDIR}/manifests/charts/base/crds/*.gen.yaml"
+cp "${LEGACY_CRD_BUNDLE_PATH}" "${ROOTDIR}/manifests/charts/base/crds/crd-all.gen.yaml"
+cp "${API_TMP}/kubernetes/experimental.gen.yaml" "${ROOTDIR}/manifests/charts/base/crds/experimental.gen.yaml"
+cp "${API_TMP}/kubernetes/standard.gen.yaml" "${ROOTDIR}/manifests/charts/base/crds/standard.gen.yaml"
 
 cd "${ROOTDIR}"
 
