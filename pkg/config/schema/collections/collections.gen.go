@@ -133,6 +133,7 @@ var (
 		Version:    "v1alpha3",
 		VersionAliases: []string{
 			"v1beta1",
+			"v1",
 		},
 		Proto: "istio.networking.v1alpha3.DestinationRule", StatusProto: "istio.meta.v1alpha1.IstioStatus",
 		ReflectType: reflect.TypeOf(&istioioapinetworkingv1alpha3.DestinationRule{}).Elem(), StatusType: reflect.TypeOf(&istioioapimetav1alpha1.IstioStatus{}).Elem(),
@@ -211,6 +212,7 @@ var (
 		Version:    "v1alpha3",
 		VersionAliases: []string{
 			"v1beta1",
+			"v1",
 		},
 		Proto: "istio.networking.v1alpha3.Gateway", StatusProto: "istio.meta.v1alpha1.IstioStatus",
 		ReflectType: reflect.TypeOf(&istioioapinetworkingv1alpha3.Gateway{}).Elem(), StatusType: reflect.TypeOf(&istioioapimetav1alpha1.IstioStatus{}).Elem(),
@@ -404,7 +406,10 @@ var (
 		Kind:       "PeerAuthentication",
 		Plural:     "peerauthentications",
 		Version:    "v1beta1",
-		Proto:      "istio.security.v1beta1.PeerAuthentication", StatusProto: "istio.meta.v1alpha1.IstioStatus",
+		VersionAliases: []string{
+			"v1",
+		},
+		Proto: "istio.security.v1beta1.PeerAuthentication", StatusProto: "istio.meta.v1alpha1.IstioStatus",
 		ReflectType: reflect.TypeOf(&istioioapisecurityv1beta1.PeerAuthentication{}).Elem(), StatusType: reflect.TypeOf(&istioioapimetav1alpha1.IstioStatus{}).Elem(),
 		ProtoPackage: "istio.io/api/security/v1beta1", StatusPackage: "istio.io/api/meta/v1alpha1",
 		ClusterScoped: false,
@@ -434,7 +439,10 @@ var (
 		Kind:       "ProxyConfig",
 		Plural:     "proxyconfigs",
 		Version:    "v1beta1",
-		Proto:      "istio.networking.v1beta1.ProxyConfig", StatusProto: "istio.meta.v1alpha1.IstioStatus",
+		VersionAliases: []string{
+			"v1",
+		},
+		Proto: "istio.networking.v1beta1.ProxyConfig", StatusProto: "istio.meta.v1alpha1.IstioStatus",
 		ReflectType: reflect.TypeOf(&istioioapinetworkingv1beta1.ProxyConfig{}).Elem(), StatusType: reflect.TypeOf(&istioioapimetav1alpha1.IstioStatus{}).Elem(),
 		ProtoPackage: "istio.io/api/networking/v1beta1", StatusPackage: "istio.io/api/meta/v1alpha1",
 		ClusterScoped: false,
@@ -532,6 +540,7 @@ var (
 		Version:    "v1alpha3",
 		VersionAliases: []string{
 			"v1beta1",
+			"v1",
 		},
 		Proto: "istio.networking.v1alpha3.ServiceEntry", StatusProto: "istio.meta.v1alpha1.IstioStatus",
 		ReflectType: reflect.TypeOf(&istioioapinetworkingv1alpha3.ServiceEntry{}).Elem(), StatusType: reflect.TypeOf(&istioioapimetav1alpha1.IstioStatus{}).Elem(),
@@ -550,6 +559,7 @@ var (
 		Version:    "v1alpha3",
 		VersionAliases: []string{
 			"v1beta1",
+			"v1",
 		},
 		Proto: "istio.networking.v1alpha3.Sidecar", StatusProto: "istio.meta.v1alpha1.IstioStatus",
 		ReflectType: reflect.TypeOf(&istioioapinetworkingv1alpha3.Sidecar{}).Elem(), StatusType: reflect.TypeOf(&istioioapimetav1alpha1.IstioStatus{}).Elem(),
@@ -611,7 +621,10 @@ var (
 		Kind:       "Telemetry",
 		Plural:     "telemetries",
 		Version:    "v1alpha1",
-		Proto:      "istio.telemetry.v1alpha1.Telemetry", StatusProto: "istio.meta.v1alpha1.IstioStatus",
+		VersionAliases: []string{
+			"v1",
+		},
+		Proto: "istio.telemetry.v1alpha1.Telemetry", StatusProto: "istio.meta.v1alpha1.IstioStatus",
 		ReflectType: reflect.TypeOf(&istioioapitelemetryv1alpha1.Telemetry{}).Elem(), StatusType: reflect.TypeOf(&istioioapimetav1alpha1.IstioStatus{}).Elem(),
 		ProtoPackage: "istio.io/api/telemetry/v1alpha1", StatusPackage: "istio.io/api/meta/v1alpha1",
 		ClusterScoped: false,
@@ -658,6 +671,7 @@ var (
 		Version:    "v1alpha3",
 		VersionAliases: []string{
 			"v1beta1",
+			"v1",
 		},
 		Proto: "istio.networking.v1alpha3.VirtualService", StatusProto: "istio.meta.v1alpha1.IstioStatus",
 		ReflectType: reflect.TypeOf(&istioioapinetworkingv1alpha3.VirtualService{}).Elem(), StatusType: reflect.TypeOf(&istioioapimetav1alpha1.IstioStatus{}).Elem(),
@@ -691,6 +705,7 @@ var (
 		Version:    "v1alpha3",
 		VersionAliases: []string{
 			"v1beta1",
+			"v1",
 		},
 		Proto: "istio.networking.v1alpha3.WorkloadEntry", StatusProto: "istio.meta.v1alpha1.IstioStatus",
 		ReflectType: reflect.TypeOf(&istioioapinetworkingv1alpha3.WorkloadEntry{}).Elem(), StatusType: reflect.TypeOf(&istioioapimetav1alpha1.IstioStatus{}).Elem(),
@@ -709,6 +724,7 @@ var (
 		Version:    "v1alpha3",
 		VersionAliases: []string{
 			"v1beta1",
+			"v1",
 		},
 		Proto: "istio.networking.v1alpha3.WorkloadGroup", StatusProto: "istio.meta.v1alpha1.IstioStatus",
 		ReflectType: reflect.TypeOf(&istioioapinetworkingv1alpha3.WorkloadGroup{}).Elem(), StatusType: reflect.TypeOf(&istioioapimetav1alpha1.IstioStatus{}).Elem(),
