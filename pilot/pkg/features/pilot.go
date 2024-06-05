@@ -234,7 +234,7 @@ var (
 	GatewayAPIDefaultGatewayClass = env.Register("PILOT_GATEWAY_API_DEFAULT_GATEWAYCLASS_NAME", "istio",
 		"Name of the default GatewayClass").Get()
 
-	ManagedGatewayController = env.Register("PILOT_GATEWAY_API_CONTROLLER_NAME", "istio.io/gateway-controller",
+	ManagedGatewayController = env.Register("PILOT_GATEWAY_API_CONTROLLER_NAME", "aks.azure.microsoft.com/istio-gateway-controller",
 		"Gateway API controller name. istiod will only reconcile Gateway API resources referencing a GatewayClass with this controller name").Get()
 )
 
