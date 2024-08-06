@@ -1,3 +1,6 @@
+//go:build windows
+// +build windows
+
 // Copyright Istio Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,21 +26,14 @@ import (
 	"path"
 	"regexp"
 	"strings"
-	"syscall"
 	"unicode"
+
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	"istio.io/istio/pkg/maps"
 	"istio.io/istio/pkg/util/sets"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
 )
-
-func GetInode(fi fs.FileInfo) (uint64, error) {
-	if stat, ok := fi.Sys().(*syscall.Stat_t); ok {
-		return stat.Ino, nil
-	}
-	return 0, fmt.Errorf("unable to get inode")
-}
 
 func (p *PodNetnsProcFinder) FindNetnsForPods(pods map[types.UID]*corev1.Pod) (PodToNetns, error) {
 	/*
