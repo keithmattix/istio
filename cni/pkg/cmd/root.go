@@ -75,8 +75,10 @@ var rootCmd = &cobra.Command{
 		log.Infof("CNI install configuration: \n%+v", cfg.InstallConfig)
 		log.Infof("CNI race repair configuration: \n%+v", cfg.RepairConfig)
 
-		// Start metrics server
-		monitoring.SetupMonitoring(cfg.InstallConfig.MonitoringPort, "/metrics", ctx.Done())
+		if !cfg.InstallConfig.InitOnly {
+			// Start metrics server
+			monitoring.SetupMonitoring(cfg.InstallConfig.MonitoringPort, "/metrics", ctx.Done())
+		}
 
 		// Start UDS log server
 		udsLogger := udsLog.NewUDSLogger(log.GetOutputLevel())
@@ -84,7 +86,6 @@ var rootCmd = &cobra.Command{
 			log.Errorf("Failed to start up UDS Log Server: %v", err)
 			return
 		}
-
 		// Creates a basic health endpoint server that reports health status
 		// based on atomic flag, as set by installer
 		// TODO nodeagent watch server should affect this too, and drop atomic flag
@@ -172,6 +173,9 @@ func init() {
 	registerBooleanParameter(constants.ChainedCNIPlugin, true, "Whether to install CNI plugin as a chained or standalone")
 	registerStringParameter(constants.CNINetworkConfig, "", "CNI configuration template as a string")
 	registerStringParameter(constants.LogLevel, "warn", "Fallback value for log level in CNI config file, if not specified in helm template")
+
+	// Initonly
+	registerBooleanParameter(constants.InitOnly, false, "Whether to run the installer in init-only mode. Disables the repair controller and reconciliation logic")
 
 	// Not configurable in CNI helm charts
 	registerStringParameter(constants.MountedCNINetDir, "/host/etc/cni/net.d", "Directory on the container where CNI networks are installed")
