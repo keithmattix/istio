@@ -1,5 +1,5 @@
-//go:build !linux
-// +build !linux
+//go:build windows
+// +build windows
 
 // Copyright Istio Authors
 //
@@ -17,11 +17,8 @@
 
 package nodeagent
 
-import (
-	"fmt"
-	"io/fs"
-)
+import "istio.io/istio/pkg/kube"
 
-func GetInode(fi fs.FileInfo) (uint64, error) {
-	return 0, fmt.Errorf("unable to get inode os not supported")
+func initMeshDataplane(client kube.Client, args AmbientArgs) (*meshDataplane, error) {
+	panic("not implemented")
 }

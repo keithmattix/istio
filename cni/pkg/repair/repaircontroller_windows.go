@@ -1,5 +1,5 @@
-//go:build !linux
-// +build !linux
+//go:build windows
+// +build windows
 
 // Copyright Istio Authors
 //
@@ -15,13 +15,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package nodeagent
+package repair
 
-import (
-	"fmt"
-	"io/fs"
-)
+import corev1 "k8s.io/api/core/v1"
 
-func GetInode(fi fs.FileInfo) (uint64, error) {
-	return 0, fmt.Errorf("unable to get inode os not supported")
+// redirectRunningPod dynamically enters the provided pod, that is already running, and programs it's networking configuration.
+func redirectRunningPod(pod *corev1.Pod, namespaceID string) error {
+	panic("not implemented")
 }

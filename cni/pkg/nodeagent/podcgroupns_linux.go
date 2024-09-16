@@ -1,3 +1,6 @@
+//go:build linux
+// +build linux
+
 // Copyright Istio Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -31,6 +34,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
+
 
 func GetInode(fi fs.FileInfo) (uint64, error) {
 	if stat, ok := fi.Sys().(*syscall.Stat_t); ok {
