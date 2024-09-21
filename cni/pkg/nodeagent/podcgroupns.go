@@ -16,7 +16,6 @@ package nodeagent
 
 import (
 	"io/fs"
-	"syscall"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -35,24 +34,6 @@ func (p PodToNetns) Close() {
 
 type PodNetnsFinder interface {
 	FindNetnsForPods(filter map[types.UID]*corev1.Pod) (PodToNetns, error)
-}
-
-type PodNetnsProcFinder struct {
-	proc          fs.FS
-	hostNetnsStat *syscall.Stat_t
-}
-
-func NewPodNetnsProcFinder(proc fs.FS) (*PodNetnsProcFinder, error) {
-	hostNetnsStat, err := statHostNetns(proc)
-	if err != nil {
-		return nil, err
-	}
-
-	return &PodNetnsProcFinder{proc: proc, hostNetnsStat: hostNetnsStat}, nil
-}
-
-func isNotNumber(r rune) bool {
-	return r < '0' || r > '9'
 }
 
 type PodNetnsEntry struct {

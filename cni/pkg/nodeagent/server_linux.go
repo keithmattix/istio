@@ -25,7 +25,6 @@ import (
 	pconstants "istio.io/istio/cni/pkg/constants"
 	"istio.io/istio/cni/pkg/iptables"
 	"istio.io/istio/pkg/kube"
-	"istio.io/istio/pkg/log"
 )
 
 func initMeshDataplane(client kube.Client, args AmbientArgs) (*meshDataplane, error) {
