@@ -81,7 +81,6 @@ func (lb *ListenerBuilder) buildWaypointInbound() []*listener.Listener {
 	// 2. IP dispatch listener, handling both VIPs and direct pod IPs.
 	// 3. Encapsulation CONNECT listener, originating the tunnel
 	wls, wps := findWaypointResources(lb.node, lb.push)
-
 	listeners = append(listeners,
 		lb.buildWaypointInboundConnectTerminate(),
 		lb.buildWaypointInternal(wls, wps.orderedServices),
@@ -127,6 +126,7 @@ func (lb *ListenerBuilder) buildHCMConnectTerminateChain(routes []*route.Route) 
 		AllowConnect: true,
 		// TODO(https://github.com/istio/istio/issues/43443)
 		// All streams are bound to the same worker. Therefore, we need to limit for better fairness.
+		// TODO: This is probably too low for east/west gateways; maybe need to let this be configurable.
 		MaxConcurrentStreams: &wrappers.UInt32Value{Value: 100},
 		// well behaved clients should close connections.
 		// not all clients are well-behaved. This will prune
@@ -220,7 +220,9 @@ func (lb *ListenerBuilder) buildWaypointInboundConnectTerminate() *listener.List
 	return lb.buildConnectTerminateListener(routes)
 }
 
+// This is the regular waypoint flow, where we terminate the tunnel, and then re-encap.
 func (lb *ListenerBuilder) buildWaypointInternal(wls []model.WorkloadInfo, svcs []*model.Service) *listener.Listener {
+	terminate := isDoubleHbone(lb.node)
 	ipMatcher := &matcher.IPMatcher{}
 	svcHostnameMap := &matcher.Matcher_MatcherTree_MatchMap{
 		Map: make(map[string]*matcher.Matcher_OnMatch),
@@ -322,36 +324,48 @@ func (lb *ListenerBuilder) buildWaypointInternal(wls []model.WorkloadInfo, svcs 
 					Name:    cc.clusterName,
 				}
 			}
-			if port.Protocol.IsUnsupported() {
-				// If we need to sniff, insert two chains and the protocol detector
-				chains = append(chains, tcpChain, httpChain)
-				protocolMatcher := match.ToMatcher(match.NewAppProtocol(match.ProtocolMatch{
-					TCP:  match.ToChain(tcpClusterName),
-					HTTP: match.ToChain(httpClusterName),
-				}))
-				portMapper.Map[portString] = protocolMatcher
-				svcHostnameMap.Map[authorityKey] = protocolMatcher
-				portProtocols[port.Port] = protocol.Unsupported
-			} else if port.Protocol.IsHTTP() {
-				// Otherwise, just insert HTTP/TCP
-				chains = append(chains, httpChain)
-				portMapper.Map[portString] = match.ToChain(httpChain.Name)
-				svcHostnameMap.Map[authorityKey] = match.ToChain(httpChain.Name)
-				// TCP and HTTP on the same port, mark it as requiring sniffing
-				if portProtocols[port.Port] != "" && portProtocols[port.Port] != protocol.HTTP {
-					portProtocols[port.Port] = protocol.Unsupported
-				} else {
-					portProtocols[port.Port] = protocol.HTTP
-				}
-			} else {
+			if terminate {
+				// We want to send to all ports regardless of protocol, but we want the filter chains to tcp proxy no matter what
+				// (since we're expecting double-hbone). There's no point in sniffing, so we just send to the TCP chain.
 				chains = append(chains, tcpChain)
-				portMapper.Map[portString] = match.ToChain(tcpChain.Name)
+				// Pick the TCP chain; as long as the cluster exists (and we'll ensure it does if we're terminating),
+				// traffic should end up at the correct destination
+				portMapper.Map[portString] = match.ToChain(tcpClusterName)
 				svcHostnameMap.Map[authorityKey] = match.ToChain(tcpChain.Name)
-				// TCP and HTTP on the same port, mark it as requiring sniffing
-				if portProtocols[port.Port] != "" && !portProtocols[port.Port].IsTCP() {
+				portProtocols[port.Port] = protocol.TCP // Inner HBONE with no SNI == TCP protocol for listener purposes
+			} else {
+				if port.Protocol.IsUnsupported() {
+					// If we need to sniff, insert two chains and the protocol detector
+					chains = append(chains, tcpChain, httpChain)
+					protocolMatcher := match.ToMatcher(match.NewAppProtocol(match.ProtocolMatch{
+						TCP:  match.ToChain(tcpClusterName),
+						HTTP: match.ToChain(httpClusterName),
+					}))
+					portMapper.Map[portString] = protocolMatcher
+					svcHostnameMap.Map[authorityKey] = protocolMatcher
 					portProtocols[port.Port] = protocol.Unsupported
+				} else if port.Protocol.IsHTTP() {
+					// Otherwise, just insert HTTP/TCP
+					chains = append(chains, httpChain)
+					portMapper.Map[portString] = match.ToChain(httpChain.Name)
+					svcHostnameMap.Map[authorityKey] = match.ToChain(httpChain.Name)
+					// TCP and HTTP on the same port, mark it as requiring sniffing
+					if portProtocols[port.Port] != "" && portProtocols[port.Port] != protocol.HTTP {
+						portProtocols[port.Port] = protocol.Unsupported
+					} else {
+						portProtocols[port.Port] = protocol.HTTP
+					}
 				} else {
-					portProtocols[port.Port] = port.Protocol
+					// Note that this could include double hbone
+					chains = append(chains, tcpChain)
+					portMapper.Map[portString] = match.ToChain(tcpChain.Name)
+					svcHostnameMap.Map[authorityKey] = match.ToChain(tcpChain.Name)
+					// TCP and HTTP on the same port, mark it as requiring sniffing
+					if portProtocols[port.Port] != "" && !portProtocols[port.Port].IsTCP() {
+						portProtocols[port.Port] = protocol.Unsupported
+					} else {
+						portProtocols[port.Port] = port.Protocol
+					}
 				}
 			}
 
