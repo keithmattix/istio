@@ -107,6 +107,7 @@ func filterWaypointOutboundServices(
 	return res
 }
 
+// TODO: memoize this on the MergedServer/MergedGateway
 func isDoubleHbone(node *model.Proxy) bool {
 	servers := node.MergedGateway.MergedServers
 	hbonePortFound := false

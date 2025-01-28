@@ -40,6 +40,7 @@ import (
 	wrappers "google.golang.org/protobuf/types/known/wrapperspb"
 
 	extensions "istio.io/api/extensions/v1alpha1"
+	"istio.io/api/label"
 	networking "istio.io/api/networking/v1alpha3"
 	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/model"
@@ -56,6 +57,7 @@ import (
 	"istio.io/istio/pilot/pkg/util/protoconv"
 	xdsfilters "istio.io/istio/pilot/pkg/xds/filters"
 	"istio.io/istio/pkg/config"
+	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/config/host"
 	"istio.io/istio/pkg/config/protocol"
 	"istio.io/istio/pkg/proto"
@@ -80,6 +82,12 @@ func (lb *ListenerBuilder) buildWaypointInbound() []*listener.Listener {
 	// 1. Decapsulation CONNECT listener.
 	// 2. IP dispatch listener, handling both VIPs and direct pod IPs.
 	// 3. Encapsulation CONNECT listener, originating the tunnel
+	// TODO: is this sufficient
+	controller, isManagedGateway := lb.node.Labels[label.GatewayManaged.Name]
+	if isManagedGateway && controller == constants.ManagedGatewayEastWestControllerLabel {
+		// East-west gateways have a different selector than regular waypoints
+		
+	}
 	wls, wps := findWaypointResources(lb.node, lb.push)
 	listeners = append(listeners,
 		lb.buildWaypointInboundConnectTerminate(),
