@@ -1060,6 +1060,10 @@ func buildCommonConnectTLSContext(proxy *model.Proxy, push *model.PushContext) *
 		TlsMaximumProtocolVersion: tls.TlsParameters_TLSv1_3,
 		TlsMinimumProtocolVersion: tls.TlsParameters_TLSv1_3,
 	}
+	if isEastWestGateway(proxy) {
+		// The gateway should accept TLS 1.2 for compatibility with older clients.
+		ctx.TlsParams.TlsMinimumProtocolVersion = tls.TlsParameters_TLSv1_2
+	}
 	// Compliance for Envoy tunnel TLS contexts.
 	security.EnforceCompliance(ctx)
 	return ctx
