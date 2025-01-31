@@ -182,7 +182,7 @@ func (cb *ClusterBuilder) buildWaypointInboundVIPCluster(
 		maybeApplyEdsConfig(localCluster.cluster)
 		// Set a transport socket since we're going to an internal listener
 		transportSocket := util.RawBufferTransport()
-		localCluster.cluster.TransportSocket = util.TunnelHostInternalUpstreamTransportSocket(transportSocket)
+		localCluster.cluster.TransportSocket = util.WaypointInternalUpstreamTransportSocket(transportSocket)
 		return localCluster.build()
 	}
 
