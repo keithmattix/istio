@@ -49,6 +49,10 @@ func (n *namespaceCloser) Inode() uint64 {
 	panic("not implemented on windows OS")
 }
 
+func (n *namespaceCloser) OwnerProcStarttime() uint64 {
+	panic("not implemented on windows OS")
+}
+
 func (n *namespaceCloser) Namespace() WindowsNamespace {
 	return n.ns
 }
