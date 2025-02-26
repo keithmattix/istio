@@ -522,7 +522,8 @@ _internal_defaults_do_not_set:
       topologySpreadConstraints: []
 
       # Node labels for the waypoint proxy.
-      nodeSelector: {}
+      nodeSelector:
+        kubernetes.io/os: linux
 
       # Tolerations for the waypoint proxy.
       tolerations: []
