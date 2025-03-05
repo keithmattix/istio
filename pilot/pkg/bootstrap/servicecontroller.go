@@ -51,9 +51,7 @@ func (s *Server) initServiceControllers(args *PilotArgs) error {
 		log.Infof("Adding %s registry adapter", serviceRegistry)
 		switch serviceRegistry {
 		case provider.Kubernetes:
-			if err := s.initKubeRegistry(args); err != nil {
-				return err
-			}
+			s.initKubeRegistry(args)
 		default:
 			return fmt.Errorf("service registry %s is not supported", r)
 		}
@@ -69,7 +67,7 @@ func (s *Server) initServiceControllers(args *PilotArgs) error {
 }
 
 // initKubeRegistry creates all the k8s service controllers under this pilot
-func (s *Server) initKubeRegistry(args *PilotArgs) (err error) {
+func (s *Server) initKubeRegistry(args *PilotArgs) {
 	args.RegistryOptions.KubeOptions.ClusterID = s.clusterID
 	args.RegistryOptions.KubeOptions.Revision = args.Revision
 	args.RegistryOptions.KubeOptions.KrtDebugger = args.KrtDebugger
@@ -79,8 +77,10 @@ func (s *Server) initKubeRegistry(args *PilotArgs) (err error) {
 	args.RegistryOptions.KubeOptions.MeshWatcher = s.environment.Watcher
 	args.RegistryOptions.KubeOptions.SystemNamespace = args.Namespace
 	args.RegistryOptions.KubeOptions.MeshServiceController = s.ServiceController()
+
 	// pass namespace to k8s service registry
-	kubecontroller.NewMulticluster(args.PodName,
+	// we need this controller to run, but don't need the return value
+	_ = kubecontroller.NewMulticluster(args.PodName,
 		args.RegistryOptions.KubeOptions,
 		s.serviceEntryController,
 		s.istiodCertBundleWatcher,
@@ -89,6 +89,4 @@ func (s *Server) initKubeRegistry(args *PilotArgs) (err error) {
 		s.environment.ClusterLocal(),
 		s.server,
 		s.multiclusterController)
-
-	return
 }

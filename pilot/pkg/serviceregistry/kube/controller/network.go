@@ -23,6 +23,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/gateway-api/apis/v1beta1"
 
 	"istio.io/api/label"
@@ -82,7 +83,7 @@ func initNetworkManager(c *Controller, options Options) *networkManager {
 		discoverRemoteGatewayResources: options.ConfigCluster,
 	}
 	// initialize the gateway resource client when any feature that uses it is enabled
-	if features.MultiNetworkGatewayAPI {
+	if features.MultiNetworkGatewayAPI || features.EnableAmbientMultiNetwork {
 		n.gatewayResourceClient = kclient.NewDelayedInformer[*v1beta1.Gateway](c.client, gvr.KubernetesGateway, kubetypes.StandardInformer, kubetypes.Filter{})
 		// conditionally register this handler
 		registerHandlers(c, n.gatewayResourceClient, "Gateways", n.handleGatewayResource, nil)
@@ -271,7 +272,11 @@ func (n *networkManager) extractGatewaysInner(svc *model.Service) bool {
 	n.Lock()
 	defer n.Unlock()
 	previousGateways := n.networkGatewaysBySvc[svc.Hostname]
-	gateways := n.getGatewayDetails(svc)
+	var gateways []model.NetworkGateway
+	// We don't find network gateways based on services in ambient mode
+	if !features.EnableAmbientMultiNetwork {
+		gateways = n.getGatewayDetails(svc)
+	}
 	// short circuit for most services.
 	if len(previousGateways) == 0 && len(gateways) == 0 {
 		return false
@@ -336,6 +341,73 @@ func (n *networkManager) getGatewayDetails(svc *model.Service) []model.NetworkGa
 	return nil
 }
 
+func buildPassthroughNetworkGatewaySet(base model.NetworkGateway, gw *v1beta1.Gateway) model.NetworkGatewaySet {
+	autoPassthrough := func(l v1beta1.Listener) bool {
+		return kube.IsAutoPassthrough(gw.GetLabels(), l)
+	}
+
+	newGateways := model.NetworkGatewaySet{}
+	for _, addr := range gw.Spec.Addresses {
+		if addr.Type == nil {
+			continue
+		}
+		if addrType := *addr.Type; addrType != v1beta1.IPAddressType && addrType != v1beta1.HostnameAddressType {
+			continue
+		}
+		for _, l := range slices.Filter(gw.Spec.Listeners, autoPassthrough) {
+			networkGateway := base
+			networkGateway.Addr = addr.Value
+			networkGateway.Port = uint32(l.Port)
+			newGateways.Insert(networkGateway)
+		}
+		for _, l := range gw.Spec.Listeners {
+			if l.Protocol == "HBONE" {
+				networkGateway := base
+				networkGateway.Addr = addr.Value
+				networkGateway.Port = uint32(l.Port)
+				networkGateway.HBONEPort = uint32(l.Port)
+				newGateways.Insert(networkGateway)
+			}
+		}
+	}
+
+	return newGateways
+}
+
+func buildHboneNetworkGatewaySet(base model.NetworkGateway, gw *v1beta1.Gateway) model.NetworkGatewaySet {
+	newGateways := model.NetworkGatewaySet{}
+	// We only accept the east west gateway class. We assume it's well-formed (HBONE listener, etc.)
+	// because its own cluster should do validation
+	// TODO: Consider allowing the user to use a custom gatewayclass by setting an env var
+	if gw.Spec.GatewayClassName != constants.EastWestGatewayClassName {
+		return newGateways
+	}
+
+	isDoubleHboneListener := func(l v1beta1.Listener) bool {
+		isTLSTerminate := l.TLS != nil && l.TLS.Mode != nil && *l.TLS.Mode == gatewayv1.TLSModeTerminate
+		// TODO: We should probably support custom HBONE ports, but need to solve that in all of ambient
+		return l.Protocol == "HBONE" && l.Port == model.HBoneInboundListenPort && isTLSTerminate
+	}
+
+	for _, addr := range gw.Spec.Addresses {
+		if addr.Type == nil {
+			continue
+		}
+		if addrType := *addr.Type; addrType != v1beta1.IPAddressType && addrType != v1beta1.HostnameAddressType {
+			continue
+		}
+		for _, l := range slices.Filter(gw.Spec.Listeners, isDoubleHboneListener) {
+			networkGateway := base
+			networkGateway.Addr = addr.Value
+			networkGateway.Port = uint32(l.Port)
+			networkGateway.HBONEPort = uint32(l.Port)
+			newGateways.Insert(networkGateway)
+		}
+	}
+
+	return newGateways
+}
+
 // handleGateway resource adds a NetworkGateway for each combination of address and auto-passthrough listener
 // discovering duplicates from the generated Service is not a huge concern as we de-duplicate in NetworkGateways
 // which returns a set, although it's not totally efficient.
@@ -368,10 +440,6 @@ func (n *networkManager) handleGatewayResource(_ *v1beta1.Gateway, gw *v1beta1.G
 		return nil
 	}
 
-	autoPassthrough := func(l v1beta1.Listener) bool {
-		return kube.IsAutoPassthrough(gw.GetLabels(), l)
-	}
-
 	base := model.NetworkGateway{
 		Network: network.ID(gw.GetLabels()[label.TopologyNetwork.Name]),
 		Cluster: n.clusterID,
@@ -380,30 +448,14 @@ func (n *networkManager) handleGatewayResource(_ *v1beta1.Gateway, gw *v1beta1.G
 			Name:      kube.GatewaySA(gw),
 		},
 	}
-	newGateways := model.NetworkGatewaySet{}
-	for _, addr := range gw.Spec.Addresses {
-		if addr.Type == nil {
-			continue
-		}
-		if addrType := *addr.Type; addrType != v1beta1.IPAddressType && addrType != v1beta1.HostnameAddressType {
-			continue
-		}
-		for _, l := range slices.Filter(gw.Spec.Listeners, autoPassthrough) {
-			networkGateway := base
-			networkGateway.Addr = addr.Value
-			networkGateway.Port = uint32(l.Port)
-			newGateways.Insert(networkGateway)
-		}
-		for _, l := range gw.Spec.Listeners {
-			if l.Protocol == "HBONE" {
-				networkGateway := base
-				networkGateway.Addr = addr.Value
-				networkGateway.Port = uint32(l.Port)
-				networkGateway.HBONEPort = uint32(l.Port)
-				newGateways.Insert(networkGateway)
-			}
-		}
+
+	var newGateways model.NetworkGatewaySet
+	if features.EnableAmbientMultiNetwork {
+		newGateways = buildHboneNetworkGatewaySet(base, gw)
+	} else {
+		newGateways = buildPassthroughNetworkGatewaySet(base, gw)
 	}
+
 	n.gatewaysFromResource[gw.UID] = newGateways
 
 	if len(previousGateways) != len(newGateways) {
