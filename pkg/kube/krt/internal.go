@@ -78,8 +78,7 @@ type collectionOptions struct {
 	joinUnchecked bool
 
 	indexCollectionFromString func(string) any
-	// Options for nested collections only
-	primaryCollectionKey string
+	metadata                  Metadata
 }
 
 type indexedDependency struct {
