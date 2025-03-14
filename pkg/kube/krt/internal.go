@@ -78,6 +78,8 @@ type collectionOptions struct {
 	joinUnchecked bool
 
 	indexCollectionFromString func(string) any
+	// Options for nested collections only
+	primaryCollectionKey string
 }
 
 type indexedDependency struct {
