@@ -28,6 +28,7 @@ func runInHost[T any](f func() (T, error)) (T, error) {
 // On windows, we can look at the pod ip address and enumerate all of the
 // networks to find the one that corresponds with this pod. From there,
 // we return the network namespace guid.
+// TODO: Implement this for the repair controller
 func getPodNetNs(pod *corev1.Pod) (string, error) {
 	panic("not implemented")
 }

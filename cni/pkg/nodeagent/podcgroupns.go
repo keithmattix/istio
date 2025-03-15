@@ -36,6 +36,10 @@ type PodNetnsFinder interface {
 	FindNetnsForPods(filter map[types.UID]*corev1.Pod) (PodToNetns, error)
 }
 
+func isNotNumber(r rune) bool {
+	return r < '0' || r > '9'
+}
+
 type PodNetnsEntry struct {
 	uid                types.UID
 	netns              fs.File

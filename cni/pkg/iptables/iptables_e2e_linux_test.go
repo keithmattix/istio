@@ -20,14 +20,11 @@ package iptables
 
 import (
 	"bytes"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
 
-	// Create a new mount namespace.
-	"github.com/howardjohn/unshare-go/mountns"
 	// Create a new network namespace. This will have the 'lo' interface ready but nothing else.
 	_ "github.com/howardjohn/unshare-go/netns"
 	"github.com/howardjohn/unshare-go/userns"
@@ -54,57 +51,44 @@ func TestIdempotentEquivalentInPodRerun(t *testing.T) {
 
 	tests := GetCommonInPodTestCases()
 
-	ext := &dep.RealDependencies{
-		UsePodScopedXtablesLock: false,
-		NetworkNamespace:        "",
-	}
-	iptVer, err := ext.DetectIptablesVersion(false)
-	if err != nil {
-		t.Fatalf("Can't detect iptables version: %v", err)
-	}
-	ipt6Ver, err := ext.DetectIptablesVersion(true)
-	if err != nil {
-		t.Fatalf("Can't detect ip6tables version")
-	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := constructTestConfig()
 			tt.config(cfg)
 
 			deps := &dep.RealDependencies{}
-			iptConfigurator, _, err := NewIptablesConfigurator(cfg, cfg, deps, deps, EmptyNlDeps())
-			builder := iptConfigurator.AppendInpodRules(tt.podOverrides)
+			_, iptConfiguratorPod, err := NewIptablesConfigurator(cfg, cfg, deps, deps, EmptyNlDeps())
+			builder := iptConfiguratorPod.AppendInpodRules(tt.podOverrides)
 			if err != nil {
 				t.Fatalf("failed to setup iptables configurator: %v", err)
 			}
 			defer func() {
-				assert.NoError(t, iptConfigurator.DeleteInpodRules(log))
-				residueExists, deltaExists := iptablescapture.VerifyIptablesState(log, iptConfigurator.ext, builder, &iptVer, &ipt6Ver)
+				assert.NoError(t, iptConfiguratorPod.DeleteInpodRules(log))
+				residueExists, deltaExists := iptablescapture.VerifyIptablesState(log, iptConfiguratorPod.ext, builder, &iptConfiguratorPod.iptV, &iptConfiguratorPod.ipt6V)
 				assert.Equal(t, residueExists, false)
 				assert.Equal(t, deltaExists, true)
 			}()
-			assert.NoError(t, iptConfigurator.CreateInpodRules(scopes.CNIAgent, tt.podOverrides))
-			residueExists, deltaExists := iptablescapture.VerifyIptablesState(log, iptConfigurator.ext, builder, &iptVer, &ipt6Ver)
+			assert.NoError(t, iptConfiguratorPod.CreateInpodRules(scopes.CNIAgent, tt.podOverrides))
+			residueExists, deltaExists := iptablescapture.VerifyIptablesState(log, iptConfiguratorPod.ext, builder, &iptConfiguratorPod.iptV, &iptConfiguratorPod.ipt6V)
 			assert.Equal(t, residueExists, true)
 			assert.Equal(t, deltaExists, false)
 
 			t.Log("Starting cleanup")
 			// Cleanup, should work
-			assert.NoError(t, iptConfigurator.DeleteInpodRules(log))
-			residueExists, deltaExists = iptablescapture.VerifyIptablesState(log, iptConfigurator.ext, builder, &iptVer, &ipt6Ver)
+			assert.NoError(t, iptConfiguratorPod.DeleteInpodRules(log))
+			residueExists, deltaExists = iptablescapture.VerifyIptablesState(log, iptConfiguratorPod.ext, builder, &iptConfiguratorPod.iptV, &iptConfiguratorPod.ipt6V)
 			assert.Equal(t, residueExists, false)
 			assert.Equal(t, deltaExists, true)
 
 			t.Log("Second run")
 			// Apply should work again
-			assert.NoError(t, iptConfigurator.CreateInpodRules(scopes.CNIAgent, tt.podOverrides))
-			residueExists, deltaExists = iptablescapture.VerifyIptablesState(log, iptConfigurator.ext, builder, &iptVer, &ipt6Ver)
+			assert.NoError(t, iptConfiguratorPod.CreateInpodRules(scopes.CNIAgent, tt.podOverrides))
+			residueExists, deltaExists = iptablescapture.VerifyIptablesState(log, iptConfiguratorPod.ext, builder, &iptConfiguratorPod.iptV, &iptConfiguratorPod.ipt6V)
 			assert.Equal(t, residueExists, true)
 			assert.Equal(t, deltaExists, false)
 
 			t.Log("Third run")
-			assert.NoError(t, iptConfigurator.CreateInpodRules(scopes.CNIAgent, tt.podOverrides))
+			assert.NoError(t, iptConfiguratorPod.CreateInpodRules(scopes.CNIAgent, tt.podOverrides))
 		})
 	}
 }
@@ -114,69 +98,56 @@ func TestIdempotentUnequalInPodRerun(t *testing.T) {
 
 	tests := GetCommonInPodTestCases()
 
-	ext := &dep.RealDependencies{
-		UsePodScopedXtablesLock: false,
-		NetworkNamespace:        "",
-	}
-	iptVer, err := ext.DetectIptablesVersion(false)
-	if err != nil {
-		t.Fatalf("Can't detect iptables version: %v", err)
-	}
-	ipt6Ver, err := ext.DetectIptablesVersion(true)
-	if err != nil {
-		t.Fatalf("Can't detect ip6tables version")
-	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := constructTestConfig()
 			tt.config(cfg)
 			var stdout, stderr bytes.Buffer
 			deps := &dep.RealDependencies{}
-			iptConfigurator, _, err := NewIptablesConfigurator(cfg, cfg, deps, deps, EmptyNlDeps())
-			builder := iptConfigurator.AppendInpodRules(tt.podOverrides)
+			_, iptConfiguratorPod, err := NewIptablesConfigurator(cfg, cfg, deps, deps, EmptyNlDeps())
+			builder := iptConfiguratorPod.AppendInpodRules(tt.podOverrides)
 			if err != nil {
 				t.Fatalf("failed to setup iptables configurator: %v", err)
 			}
 
 			defer func() {
-				assert.NoError(t, iptConfigurator.DeleteInpodRules(log))
-				residueExists, deltaExists := iptablescapture.VerifyIptablesState(log, iptConfigurator.ext, builder, &iptVer, &ipt6Ver)
+				assert.NoError(t, iptConfiguratorPod.DeleteInpodRules(log))
+				residueExists, deltaExists := iptablescapture.VerifyIptablesState(log, iptConfiguratorPod.ext, builder, &iptConfiguratorPod.iptV, &iptConfiguratorPod.ipt6V)
 				assert.Equal(t, residueExists, true)
 				assert.Equal(t, deltaExists, true)
 				// Remove additional rule
-				cmd := exec.Command("iptables", "-t", "nat", "-D", "OUTPUT", "-p", "tcp", "--dport", "123", "-j", "ACCEPT")
+				cmd := exec.Command(iptConfiguratorPod.iptV.DetectedBinary, "-t", "nat", "-D", "OUTPUT", "-p", "tcp", "--dport", "123", "-j", "ACCEPT")
 				cmd.Stdout = &stdout
 				cmd.Stderr = &stderr
 				if err := cmd.Run(); err != nil {
 					t.Errorf("iptables cmd (%s %s) failed: %s", cmd.Path, cmd.Args, stderr.String())
 				}
-				residueExists, deltaExists = iptablescapture.VerifyIptablesState(log, iptConfigurator.ext, builder, &iptVer, &ipt6Ver)
+				residueExists, deltaExists = iptablescapture.VerifyIptablesState(log, iptConfiguratorPod.ext, builder, &iptConfiguratorPod.iptV, &iptConfiguratorPod.ipt6V)
 				assert.Equal(t, residueExists, false)
 				assert.Equal(t, deltaExists, true)
 			}()
 
-			assert.NoError(t, iptConfigurator.CreateInpodRules(scopes.CNIAgent, tt.podOverrides))
-			residueExists, deltaExists := iptablescapture.VerifyIptablesState(log, iptConfigurator.ext, builder, &iptVer, &ipt6Ver)
+			assert.NoError(t, iptConfiguratorPod.CreateInpodRules(scopes.CNIAgent, tt.podOverrides))
+			residueExists, deltaExists := iptablescapture.VerifyIptablesState(log, iptConfiguratorPod.ext, builder, &iptConfiguratorPod.iptV, &iptConfiguratorPod.ipt6V)
 			assert.Equal(t, residueExists, true)
 			assert.Equal(t, deltaExists, false)
 
 			// Diverge by creating new ISTIO chains
-			cmd := exec.Command("iptables", "-t", "nat", "-N", "ISTIO_TEST")
+			cmd := exec.Command(iptConfiguratorPod.iptV.DetectedBinary, "-t", "nat", "-N", "ISTIO_TEST")
 			cmd.Stdout = &stdout
 			cmd.Stderr = &stderr
 			if err := cmd.Run(); err != nil {
 				t.Errorf("iptables cmd (%s %s) failed: %s", cmd.Path, cmd.Args, stderr.String())
 			}
 
-			cmd = exec.Command("iptables", "-t", "nat", "-A", "OUTPUT", "-j", "ISTIO_TEST")
+			cmd = exec.Command(iptConfiguratorPod.iptV.DetectedBinary, "-t", "nat", "-A", "OUTPUT", "-j", "ISTIO_TEST")
 			cmd.Stdout = &stdout
 			cmd.Stderr = &stderr
 			if err := cmd.Run(); err != nil {
 				t.Errorf("iptables cmd (%s %s) failed: %s", cmd.Path, cmd.Args, stderr.String())
 			}
 
-			cmd = exec.Command("iptables", "-t", "nat", "-A", "ISTIO_TEST", "-p", "tcp", "--dport", "123", "-j", "ACCEPT")
+			cmd = exec.Command(iptConfiguratorPod.iptV.DetectedBinary, "-t", "nat", "-A", "ISTIO_TEST", "-p", "tcp", "--dport", "123", "-j", "ACCEPT")
 			cmd.Stdout = &stdout
 			cmd.Stderr = &stderr
 			if err := cmd.Run(); err != nil {
@@ -184,27 +155,27 @@ func TestIdempotentUnequalInPodRerun(t *testing.T) {
 			}
 
 			// Apply required after tempering with ISTIO chains
-			residueExists, deltaExists = iptablescapture.VerifyIptablesState(log, iptConfigurator.ext, builder, &iptVer, &ipt6Ver)
+			residueExists, deltaExists = iptablescapture.VerifyIptablesState(log, iptConfiguratorPod.ext, builder, &iptConfiguratorPod.iptV, &iptConfiguratorPod.ipt6V)
 			assert.Equal(t, residueExists, true)
 			assert.Equal(t, deltaExists, true)
 
 			// Creating new inpod rules should fail if reconciliation is disabled
 			cfg.Reconcile = false
-			assert.Error(t, iptConfigurator.CreateInpodRules(scopes.CNIAgent, tt.podOverrides))
+			assert.Error(t, iptConfiguratorPod.CreateInpodRules(scopes.CNIAgent, tt.podOverrides))
 
 			// Creating new inpod rules should succeed if reconciliation is enabled
 			cfg.Reconcile = true
-			assert.NoError(t, iptConfigurator.CreateInpodRules(scopes.CNIAgent, tt.podOverrides))
-			residueExists, deltaExists = iptablescapture.VerifyIptablesState(log, iptConfigurator.ext, builder, &iptVer, &ipt6Ver)
+			assert.NoError(t, iptConfiguratorPod.CreateInpodRules(scopes.CNIAgent, tt.podOverrides))
+			residueExists, deltaExists = iptablescapture.VerifyIptablesState(log, iptConfiguratorPod.ext, builder, &iptConfiguratorPod.iptV, &iptConfiguratorPod.ipt6V)
 			assert.Equal(t, residueExists, true)
 			assert.Equal(t, deltaExists, false)
 
 			// Jump added by tempering shall no longer exist
-			cmd = exec.Command("iptables", "-t", "nat", "-C", "OUTPUT", "-j", "ISTIO_TEST")
+			cmd = exec.Command(iptConfiguratorPod.iptV.DetectedBinary, "-t", "nat", "-C", "OUTPUT", "-j", "ISTIO_TEST")
 			assert.Error(t, cmd.Run())
 
 			// Diverge from installation
-			cmd = exec.Command("iptables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "123", "-j", "ACCEPT")
+			cmd = exec.Command(iptConfiguratorPod.iptV.DetectedBinary, "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "123", "-j", "ACCEPT")
 			cmd.Stdout = &stdout
 			cmd.Stderr = &stderr
 			if err := cmd.Run(); err != nil {
@@ -212,7 +183,7 @@ func TestIdempotentUnequalInPodRerun(t *testing.T) {
 			}
 
 			// No delta after tempering with non-ISTIO chains
-			residueExists, deltaExists = iptablescapture.VerifyIptablesState(log, iptConfigurator.ext, builder, &iptVer, &ipt6Ver)
+			residueExists, deltaExists = iptablescapture.VerifyIptablesState(log, iptConfiguratorPod.ext, builder, &iptConfiguratorPod.iptV, &iptConfiguratorPod.ipt6V)
 			assert.Equal(t, residueExists, true)
 			assert.Equal(t, deltaExists, false)
 		})
@@ -295,11 +266,10 @@ func setup(t *testing.T) {
 		assert.NoError(t, userns.WriteGroupMap(map[uint32]uint32{userns.OriginalGID(): 0}))
 		// Istio iptables expects to find a non-localhost IP in some interface
 		assert.NoError(t, exec.Command("ip", "addr", "add", "240.240.240.240/32", "dev", "lo").Run())
-		// Put a new file we have permission to access over xtables.lock
-		xtables := filepath.Join(t.TempDir(), "xtables.lock")
-		_, err := os.Create(xtables)
-		assert.NoError(t, err)
-		_ = os.Mkdir("/run", 0o777)
-		_ = mountns.BindMount(xtables, "/run/xtables.lock")
 	})
+
+	tempDir := t.TempDir()
+	xtables := filepath.Join(tempDir, "xtables.lock")
+	// Override lockfile directory so that we don't need to unshare the mount namespace
+	t.Setenv("XTABLES_LOCKFILE", xtables)
 }

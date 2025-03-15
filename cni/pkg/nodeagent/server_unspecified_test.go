@@ -1,3 +1,6 @@
+//go:build !linux && !windows
+// +build !linux,!windows
+
 // Copyright Istio Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,27 +15,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package validation
+package nodeagent
 
 import (
-	"encoding/binary"
 	"fmt"
 	"net"
 	"testing"
 	"time"
 
 	"istio.io/istio/pkg/test/util/assert"
+	"istio.io/istio/tools/istio-iptables/pkg/validation"
+	"k8s.io/client-go/kubernetes"
 )
 
-func TestNtohs(t *testing.T) {
-	hostValue := ntohs(0xbeef)
-	expectValue := 0xbeef
-	if nativeByteOrder == binary.LittleEndian {
-		expectValue = 0xefbe
-	}
-	if hostValue != uint16(expectValue) {
-		t.Errorf("Expected evaluating ntohs(%v) is %v, actual %v", 0xbeef, expectValue, hostValue)
-	}
+func getFakeDP(fs *fakeServer, fakeClient kubernetes.Interface) *meshDataplane {
+	// not supported
+	return nil
 }
 
 func TestSocketOriginalDst(t *testing.T) {
@@ -44,7 +42,7 @@ func TestSocketOriginalDst(t *testing.T) {
 		for {
 			conn, err := listener.Accept()
 			assert.NoError(t, err)
-			dstIp, dPort, err := GetOriginalDestination(conn)
+			dstIp, dPort, err := validation.GetOriginalDestination(conn)
 			assert.NoError(t, err)
 			t.Fail()
 			fmt.Println(dstIp, dPort)

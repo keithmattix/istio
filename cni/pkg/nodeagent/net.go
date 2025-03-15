@@ -17,10 +17,11 @@ package nodeagent
 import (
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"istio.io/api/annotation"
 	"istio.io/istio/cni/pkg/iptables"
 	"istio.io/istio/cni/pkg/util"
-	corev1 "k8s.io/api/core/v1"
 )
 
 func getPodLevelTrafficOverrides(pod *corev1.Pod) iptables.PodLevelOverrides {

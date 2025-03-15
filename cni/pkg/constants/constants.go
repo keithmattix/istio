@@ -38,6 +38,7 @@ const (
 	CNIEventSocket                    = "cni-event-address"
 	CNIAgentRunDir                    = "cni-agent-run-dir"
 	ExcludeNamespaces                 = "exclude-namespaces"
+	PodNamespace                      = "pod-namespace"
 	AmbientEnabled                    = "ambient-enabled"
 	AmbientDNSCapture                 = "ambient-dns-capture"
 	AmbientIPv6                       = "ambient-ipv6"
@@ -69,6 +70,8 @@ const (
 	UDSLogPath            = "/log"
 	CNIEventSocketName    = "pluginevent.sock"
 	LogUDSSocketName      = "log.sock"
+	LocalRollingLogName   = "istio-cni.log"
+	RollingLogMaxSizeMB   = 10
 	CNIPluginKubeconfName = "istio-cni-kubeconfig"
 	// K8s liveness and readiness endpoints
 	LivenessEndpoint   = "/healthz"

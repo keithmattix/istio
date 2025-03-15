@@ -1,6 +1,3 @@
-//go:build linux
-// +build linux
-
 // Copyright Istio Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -26,8 +23,9 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/sys/unix"
 	"google.golang.org/protobuf/proto"
-	"istio.io/istio/pkg/zdsapi"
 	v1 "k8s.io/api/core/v1"
+
+	"istio.io/istio/pkg/zdsapi"
 )
 
 type ztunnelUDSConnection struct {
@@ -121,11 +119,6 @@ func (z *ztunnelUDSConnection) SendDataAndWaitForAck(data []byte, fd *int) (*zds
 
 	// wait for ack
 	return z.readMessage(readWriteDeadline)
-}
-
-func (z *ztunnelUDSConnection) readMessage(timeout time.Duration) (*zdsapi.WorkloadResponse, error) {
-	m, _, err := readProto[zdsapi.WorkloadResponse](z.u, timeout, nil)
-	return m, err
 }
 
 func readProto[T any, PT interface {
@@ -234,6 +227,11 @@ func (z ztunnelUDSConnection) sendDataAndWaitForAck(data []byte, fd *int) (*zdsa
 
 	// wait for ack
 	return z.readMessage(readWriteDeadline)
+}
+
+func (z ztunnelUDSConnection) readMessage(timeout time.Duration) (*zdsapi.WorkloadResponse, error) {
+	m, _, err := readProto[zdsapi.WorkloadResponse](z.u, timeout, nil)
+	return m, err
 }
 
 func newZtunnelServer(addr string, pods PodNetnsCache, keepaliveInterval time.Duration) (*ztunnelServer, error) {
