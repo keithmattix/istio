@@ -17,9 +17,10 @@ package repair
 import (
 	"fmt"
 
-	"istio.io/istio/cni/pkg/plugin"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+
+	"istio.io/istio/cni/pkg/plugin"
 )
 
 // repairPod actually dynamically repairs a pod. This is done by entering the pods network namespace and setting up rules.
