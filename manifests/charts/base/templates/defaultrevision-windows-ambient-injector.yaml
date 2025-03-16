@@ -1,11 +1,37 @@
 {{- if and .Values.experimental.windowsAmbientInjection.enabled (not (eq .Values.defaultRevision "")) }}
 {{- $whv := dict
- "revision" .Values.defaultRevision
-  "injectionPath" .Values.istiodRemote.injectionPath
-  "injectionURL" .Values.istiodRemote.injectionURL
+  "injectionPath" .Values.experimental.windowsAmbientInjection.istiodRemote.injectionPath
+  "injectionURL" .Values.experimental.windowsAmbientInjection.istiodRemote.injectionURL
   "reinvocationPolicy" .Values.sidecarInjectorWebhook.reinvocationPolicy
-  "caBundle" .Values.istiodRemote.injectionCABundle
+  "caBundle" .Values.experimental.windowsAmbientInjection.istiodRemote.injectionCABundle
   "namespace" .Release.Namespace }}
+{{- define "core" }}
+{{- /* Kubernetes unfortunately requires a unique name for the webhook in some newer versions, so we assign
+a unique prefix to each. */}}
+- name: {{.Prefix}}sidecar-injector.istio.io
+  clientConfig:
+    {{- if .injectionURL }}
+    url: "{{ .injectionURL }}"
+    {{- else }}
+    service:
+      name: istiod{{- if not (eq .revision "") }}-{{ .revision }}{{- end }}
+      namespace: {{ .namespace }}
+      path: "{{ .injectionPath }}"
+      port: 443
+    {{- end }}
+    {{- if .caBundle }}
+    caBundle: "{{ .caBundle }}"
+    {{- end }}
+  sideEffects: None
+  rules:
+  - operations: [ "CREATE" ]
+    apiGroups: [""]
+    apiVersions: ["v1"]
+    resources: ["pods"]
+  failurePolicy: Fail
+  reinvocationPolicy: "{{ .reinvocationPolicy }}"
+  admissionReviewVersions: ["v1"]
+{{- end }}
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
@@ -23,3 +49,29 @@ labels:
   app.kubernetes.io/name: "istiod"
   {{- include "istio.labels" . | nindent 4 }}
 {{- end }}
+webhooks:
+{{- /* Case 1: Namespace selector enabled, and object doesn't disable ambient mode */}}
+{{- include "core" (mergeOverwrite (deepCopy $whv) (dict "Prefix" "namespace.") ) }}
+  namespaceSelector:
+    matchExpressions:
+    - key: istio.io/dataplane-mode
+      operator: In
+      values:
+      - ambient
+  matchConditions:
+    - name: 'object does not disable ambient'
+      expression: '!("istio.io/dataplane-mode" in object.metadata.labels) || object.metadata.labels["istio.io/dataplane-mode"] != "none"'
+    - name: 'object is windows'
+      expression: 'has(object.spec.nodeSelector) && "kubernetes.io/os" in object.spec.nodeSelector && object.spec.nodeSelector["kubernetes.io/os"] == "windows"'
+{{- /* Case 2: no namespace label, but object has opted into ambient mode */}}
+{{- include "core" (mergeOverwrite (deepCopy $whv) (dict "Prefix" "object.") ) }}
+  namespaceSelector:
+    matchExpressions:
+    - key: istio.io/dataplane-mode
+      operator: DoesNotExist
+  matchConditions:
+    - name: 'object opted into ambient'
+      expression: '"istio.io/dataplane-mode" in object.metadata.labels && object.metadata.labels["istio.io/dataplane-mode"] == "ambient"'
+    - name: 'object is windows'
+      expression: 'has(object.spec.nodeSelector) && "kubernetes.io/os" in object.spec.nodeSelector && object.spec.nodeSelector["kubernetes.io/os"] == "windows"'
+# TODO: Support auto-enableemnt when we build ambient auto-enablement

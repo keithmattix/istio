@@ -225,6 +225,8 @@ func NewWebhook(p WebhookParameters) (*Webhook, error) {
 
 	p.Mux.HandleFunc("/inject", wh.serveInject)
 	p.Mux.HandleFunc("/inject/", wh.serveInject)
+	p.Mux.HandleFunc("/injectwindows", wh.serveInjectWindows)
+	p.Mux.HandleFunc("/injectwindows/", wh.serveInjectWindows)
 
 	p.Env.Watcher.AddMeshHandler(func() {
 		wh.mu.Lock()
@@ -1204,6 +1206,86 @@ func isSidecarUserMatchingAppUser(containers []corev1.Container) bool {
 	}
 
 	return sideCarUser == appUser
+}
+
+func (wh *Webhook) serveInjectWindows(w http.ResponseWriter, r *http.Request) {
+	log := log.WithLabels("path", r.URL.Path)
+	windowsAmbientInjections.Increment()
+	t0 := time.Now()
+	defer func() { windowsAmbientInjectionTime.Record(time.Since(t0).Seconds()) }()
+	var body []byte
+	if r.Body != nil {
+		if data, err := kube.HTTPConfigReader(r); err == nil {
+			body = data
+		} else {
+			handleError(log, err.Error())
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	if len(body) == 0 {
+		handleError(log, "no body found")
+		http.Error(w, "no body found", http.StatusBadRequest)
+		return
+	}
+
+	// verify the content type is accurate
+	contentType := r.Header.Get("Content-Type")
+	if contentType != "application/json" {
+		handleError(log, fmt.Sprintf("contentType=%s, expect application/json", contentType))
+		http.Error(w, "invalid Content-Type, want `application/json`", http.StatusUnsupportedMediaType)
+		return
+	}
+
+	path := ""
+	if r.URL != nil {
+		path = r.URL.Path
+	}
+
+	var reviewResponse *kube.AdmissionResponse
+	var obj runtime.Object
+	var ar *kube.AdmissionReview
+	if out, _, err := deserializer.Decode(body, nil, obj); err != nil {
+		handleError(log, fmt.Sprintf("Could not decode body: %v", err))
+		reviewResponse = toAdmissionResponse(err)
+	} else {
+		log.Debugf("AdmissionRequest for path=%s\n", path)
+		ar, err = kube.AdmissionReviewKubeToAdapter(out)
+		if err != nil {
+			handleError(log, fmt.Sprintf("Could not decode object: %v", err))
+			reviewResponse = toAdmissionResponse(err)
+		} else {
+			reviewResponse = wh.injectWindows(ar, path)
+		}
+	}
+
+	response := kube.AdmissionReview{}
+	response.Response = reviewResponse
+	var responseKube runtime.Object
+	var apiVersion string
+	if ar != nil {
+		apiVersion = ar.APIVersion
+		response.TypeMeta = ar.TypeMeta
+		if response.Response != nil {
+			if ar.Request != nil {
+				response.Response.UID = ar.Request.UID
+			}
+		}
+	}
+	responseKube = kube.AdmissionReviewAdapterToKube(&response, apiVersion)
+	resp, err := json.Marshal(responseKube)
+	if err != nil {
+		handleError(log, fmt.Sprintf("Could not encode response: %v", err))
+		http.Error(w, fmt.Sprintf("could not encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if _, err := w.Write(resp); err != nil {
+		log.Errorf("Could not write response: %v", err)
+		handleError(log, fmt.Sprintf("could not write response: %v", err))
+		http.Error(w, fmt.Sprintf("could not write response: %v", err), http.StatusInternalServerError)
+		return
+	}
+	totalWindowsSuccessfulInjections.Increment()
 }
 
 func (wh *Webhook) serveInject(w http.ResponseWriter, r *http.Request) {

@@ -24,14 +24,27 @@ var (
 		"Total number of sidecar injection requests.",
 	)
 
+	windowsAmbientInjections = monitoring.NewSum(
+		"windows_ambient_injection_total",
+		"Total number of windows initContainer injections for ambient",
+	)
+
 	totalSuccessfulInjections = monitoring.NewSum(
 		"sidecar_injection_success_total",
 		"Total number of successful sidecar injection requests.",
+	)
+	totalWindowsSuccessfulInjections = monitoring.NewSum(
+		"windows_ambient_injection_success_total",
+		"Total number of successful windows ambient injection requests.",
 	)
 
 	totalFailedInjections = monitoring.NewSum(
 		"sidecar_injection_failure_total",
 		"Total number of failed sidecar injection requests.",
+	)
+	totalWindowsFailedInjections = monitoring.NewSum(
+		"windows_ambient_injection_failed_total",
+		"Total number of failed windows ambient injection requests.",
 	)
 
 	totalSkippedInjections = monitoring.NewSum(
@@ -42,6 +55,11 @@ var (
 	injectionTime = monitoring.NewDistribution(
 		"sidecar_injection_time_seconds",
 		"Total time taken for injection in seconds.",
+		[]float64{.1, 1, 3, 5, 10, 20, 30, 60},
+	)
+	windowsAmbientInjectionTime = monitoring.NewDistribution(
+		"windows_ambient_injection_time_seconds",
+		"Total time taken for windows injection in seconds.",
 		[]float64{.1, 1, 3, 5, 10, 20, 30, 60},
 	)
 )

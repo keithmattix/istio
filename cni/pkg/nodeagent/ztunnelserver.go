@@ -213,7 +213,7 @@ func (z *ztunnelServer) handleConn(ctx context.Context, conn ZtunnelConnection) 
 					// - we wrote, got a response, but ztunnel responded with an `ack` error (in which case, this conn is not dead)
 					log.Errorf("ztunnel responded with an ack error: ackErr %s", resp.GetAck().GetError())
 				}
-			}
+			}	
 			log.Infof("ztunnel acked")
 			// Safety: Resp is buffered, so this will not block
 			update.Resp() <- updateResponse{

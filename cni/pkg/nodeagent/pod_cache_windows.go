@@ -16,6 +16,7 @@ package nodeagent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -35,6 +36,8 @@ type podNetnsCache struct {
 }
 
 var _ PodNetnsCache = &podNetnsCache{}
+
+var errNoCompartment = fmt.Errorf("no compartment found for namespace")
 
 type workloadInfo struct {
 	workload  *zdsapi.WorkloadInfo
@@ -85,7 +88,10 @@ func (p *podNetnsCache) GetEndpointsForNamespaceID(id uint32) ([]string, error) 
 func (p *podNetnsCache) UpsertPodCache(pod *corev1.Pod, namespace string) (NamespaceCloser, error) {
 	newnetns, err := p.getNamespaceDetails(namespace)
 
-	if err != nil {
+	if errors.Is(err, errNoCompartment) {
+		// This is a pre-WS2025 pod, so we need to watch it in the queue
+		log.Infof("")
+	} else if err != nil {
 		return nil, err
 	}
 	wl := workloadInfo{
@@ -141,6 +147,13 @@ func getNamespaceDetailsFromRoot() func(namespaceGuid string) (NamespaceCloser, 
 		ns, err := hcn.GetNamespaceByID(namespaceGuid)
 		if err != nil {
 			return nil, err
+		}
+
+		if ns.NamespaceId == 0 {
+			// This namespace doesn't have a compartment yet.
+			// This is probably pre-WS2025, so we need to watch this pod
+			// in the queue and push it to ztunnel once a compartment is created
+			return nil, errNoCompartment
 		}
 		log.Infof("found namespace id %d for guid %s", ns.NamespaceId, namespaceGuid)
 
