@@ -32,6 +32,15 @@ type WFPConfigurator struct {
 }
 
 func (w *WFPConfigurator) CreateInpodRules(logger *istiolog.Scope, podOverrides PodLevelOverrides) error {
+	var redirectDNS bool
+	switch podOverrides.DNSProxy {
+	case PodDNSUnset:
+		redirectDNS = w.Cfg.RedirectDNS
+	case PodDNSEnabled:
+		redirectDNS = true
+	case PodDNSDisabled:
+		redirectDNS = false
+	}
 	currentNS := hcn.GetCurrentThreadCompartmentId()
 	if currentNS == 0 {
 		return fmt.Errorf("failed to get current compartment id")
@@ -61,7 +70,7 @@ func (w *WFPConfigurator) CreateInpodRules(logger *istiolog.Scope, podOverrides 
 		}
 
 		// nothing to do if we already have a policy
-		if w.hasPolicyApplied(endpoint) {
+		if w.hasPolicyApplied(endpoint, redirectDNS) {
 			return nil
 		}
 
@@ -86,7 +95,7 @@ func (w *WFPConfigurator) CreateInpodRules(logger *istiolog.Scope, podOverrides 
 			Type:     hcn.L4WFPPROXY,
 			Settings: dataP1,
 		}
-		// 2nd policy
+		// 2nd policy for plaintext redirection
 		policySetting.FilterTuple.RemotePorts = ""
 		policySetting.InboundProxyPort = strconv.Itoa(ZtunnelInboundPlaintextPort)
 		policySetting.OutboundProxyPort = strconv.Itoa(ZtunnelOutboundPort)
@@ -98,10 +107,53 @@ func (w *WFPConfigurator) CreateInpodRules(logger *istiolog.Scope, podOverrides 
 			Settings: dataP2,
 		}
 
-		request := hcn.PolicyEndpointRequest{
-			Policies: []hcn.EndpointPolicy{endpointPolicy1, endpointPolicy2},
+		policies := []hcn.EndpointPolicy{endpointPolicy1, endpointPolicy2}
+
+		if redirectDNS {
+			udpDNSPolicy := hcn.L4WfpProxyPolicySetting{
+				OutboundProxyPort: strconv.Itoa(DNSCapturePort),
+				UserSID:           "S-1-5-18", // user local sid
+				FilterTuple: hcn.FiveTuple{
+					Protocols:   "17",
+					RemotePorts: "53",
+				},
+				OutboundExceptions: hcn.ProxyExceptions{
+					IpAddressExceptions: []string{Localhost},
+				},
+			}
+
+			tcpDNSPolicy := hcn.L4WfpProxyPolicySetting{
+				OutboundProxyPort: strconv.Itoa(DNSCapturePort),
+				UserSID:           "S-1-5-18", // user local sid
+				FilterTuple: hcn.FiveTuple{
+					Protocols:   "6",
+					RemotePorts: "53",
+				},
+				OutboundExceptions: hcn.ProxyExceptions{
+					IpAddressExceptions: []string{Localhost},
+				},
+			}
+
+			udpData, _ := json.Marshal(&udpDNSPolicy)
+			udpPolicy := hcn.EndpointPolicy{
+				Type:     hcn.L4WFPPROXY,
+				Settings: udpData,
+			}
+
+			tcpData, _ := json.Marshal(&tcpDNSPolicy)
+			tcpPolicy := hcn.EndpointPolicy{
+				Type:     hcn.L4WFPPROXY,
+				Settings: tcpData,
+			}
+
+			policies = append(policies, udpPolicy, tcpPolicy)
 		}
 
+		request := hcn.PolicyEndpointRequest{
+			Policies: policies,
+		}
+
+		log.Infof("Applying WFP policy to endpoint %s: %q", endpointID, request)
 		err = endpoint.ApplyPolicy(hcn.RequestTypeAdd, request)
 		if err != nil {
 			return err
@@ -111,13 +163,19 @@ func (w *WFPConfigurator) CreateInpodRules(logger *istiolog.Scope, podOverrides 
 	return nil
 }
 
-func (w *WFPConfigurator) hasPolicyApplied(endpoint *hcn.HostComputeEndpoint) bool {
+func (w *WFPConfigurator) hasPolicyApplied(endpoint *hcn.HostComputeEndpoint, redirectDNS bool) bool {
+	expectedPoliciesCount := 2
+	if redirectDNS {
+		expectedPoliciesCount = 4
+	}
+	actualPolicies := 0
 	for _, policy := range endpoint.Policies {
 		if policy.Type == hcn.L4WFPPROXY {
-			return true
+			actualPolicies++
 		}
 	}
-	return false
+
+	return actualPolicies == expectedPoliciesCount
 }
 
 func (w *WFPConfigurator) getPoliciesToRemove(endpoint *hcn.HostComputeEndpoint) []hcn.EndpointPolicy {

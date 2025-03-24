@@ -65,7 +65,7 @@ spec:
         # This container installs the Istio CNI binaries
         # and CNI network config file on each node.
         - name: install-cni
-          image: "istiolocaltesting.azurecr.io/istio-cni-windows:test-39"
+          image: "istiolocaltesting.azurecr.io/istio-cni-windows:20250322-9"
           ports:
           - containerPort: 15014
             name: metrics
