@@ -514,6 +514,8 @@ func mergeServiceInfosWithCluster(
 				continue
 			}
 			ports[obj.Object.Source.String()] = sets.New(obj.Object.Service.Ports...)
+			// This flat merge is ok because the VIPs themselves are per-network and we require
+			// VIP uniquness within a network
 			vips.InsertAll(obj.Object.Service.GetAddresses()...)
 			sans.InsertAll(obj.Object.Service.GetSubjectAltNames()...)
 			if obj.ClusterID == localClusterID {

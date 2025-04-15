@@ -283,23 +283,6 @@ func NewController(kubeClient kubelib.Client, options Options) *Controller {
 	})
 	registerHandlers[*v1.Pod](c, c.podsClient, "Pods", c.pods.onEvent, nil)
 
-	if features.EnableAmbient {
-		c.ambientIndex = ambient.New(ambient.Options{
-			Client:          kubeClient,
-			SystemNamespace: options.SystemNamespace,
-			DomainSuffix:    options.DomainSuffix,
-			ClusterID:       options.ClusterID,
-			Revision:        options.Revision,
-			XDSUpdater:      options.XDSUpdater,
-			MeshConfig:      options.MeshWatcher,
-			StatusNotifier:  options.StatusWritingEnabled,
-			Debugger:        options.KrtDebugger,
-			Flags: ambient.FeatureFlags{
-				DefaultAllowFromWaypoint:              features.DefaultAllowFromWaypoint,
-				EnableK8SServiceSelectWorkloadEntries: features.EnableK8SServiceSelectWorkloadEntries,
-			},
-		})
-	}
 	c.exports = newServiceExportCache(c)
 	c.imports = newServiceImportCache(c)
 
