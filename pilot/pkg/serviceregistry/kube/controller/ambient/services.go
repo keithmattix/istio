@@ -116,14 +116,7 @@ func GlobalMergedWorkloadServicesCollection(
 				return config.ObjectWithCluster[model.ServiceInfo]{ClusterID: cluster.ID, Object: &o}
 			}, opts.WithName(fmt.Sprintf("ServiceServiceInfosWithCluster[%s]", cluster.ID))...)
 
-			serviceEntriesInfo := krt.NewManyCollection(localServiceEntries, serviceEntryServiceBuilder(waypoints, namespaces, func(ctx krt.HandlerContext) network.ID {
-				return network.ID(*nw.Get())
-			}))
-			serviceEntriesWithCluster := krt.MapCollection(serviceEntriesInfo, func(o model.ServiceInfo) config.ObjectWithCluster[model.ServiceInfo] {
-				return config.ObjectWithCluster[model.ServiceInfo]{ClusterID: cluster.ID, Object: &o}
-			}, opts.WithName(fmt.Sprintf("ServiceEntryServiceInfosWithCluster[%s]", cluster.ID))...)
-
-			AllServiceInfos = append(AllServiceInfos, servicesInfoWithCluster, serviceEntriesWithCluster)
+			AllServiceInfos = append(AllServiceInfos, servicesInfoWithCluster)
 		}
 		return AllServiceInfos
 	}, opts.WithName("GlobalServiceInfosWithCluster")...)

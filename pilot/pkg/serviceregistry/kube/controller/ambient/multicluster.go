@@ -134,6 +134,9 @@ func (a *index) buildGlobalCollections(
 		opts,
 	)
 	a.networks = GlobalNetworks
+
+	// We need this because there may be services and waypoints on remote clusters that aren't represented
+	// in our local config cluster
 	GlobalWaypoints := GlobalWaypointsCollection(
 		LocalWaypoints,
 		clusters,
