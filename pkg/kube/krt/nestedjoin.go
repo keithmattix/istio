@@ -161,7 +161,7 @@ func (j *nestedjoin[T]) Register(f func(o Event[T])) HandlerRegistration {
 	return registerHandlerAsBatched(j, f)
 }
 
-func (j *nestedjoin[T]) RegisterBatch(f func(o []Event[T]), runExistingState bool) HandlerRegistration {
+func (j *nestedjoin[T]) registerBatchUnmerged(f func(o []Event[T]), runExistingState bool) HandlerRegistration {
 	j.Lock() // Take a write lock since we're also updating the collection change handlers
 	defer j.Unlock()
 	syncers := make(map[collectionUID]Syncer)
@@ -197,39 +197,119 @@ func (j *nestedjoin[T]) RegisterBatch(f func(o []Event[T]), runExistingState boo
 			delete(djhr.syncers, e.collectionValue.uid())
 
 			// Now send a final set of remove events for each object in the collection
-			// do this in a goroutine so we don't block running expensive handlers
-			go func() {
-				var events []Event[T]
-				if j.merge == nil {
-					for _, elem := range e.collectionValue.List() {
-						events = append(events, Event[T]{Old: &elem, Event: controllers.EventDelete})
+			var events []Event[T]
+			for _, elem := range e.collectionValue.List() {
+				events = append(events, Event[T]{Old: &elem, Event: controllers.EventDelete})
+			}
+			f(events)
+			return
+		}
+	})
+
+	return djhr
+}
+
+func (j *nestedjoin[T]) RegisterBatch(f func(o []Event[T]), runExistingState bool) HandlerRegistration {
+	if j.merge == nil {
+		return j.registerBatchUnmerged(f, runExistingState)
+	}
+	j.Lock() // Take a write lock since we're also updating the collection change handlers
+	defer j.Unlock()
+	syncers := make(map[collectionUID]Syncer)
+	removes := map[collectionUID]func(){}
+
+	for _, c := range j.collections.List() {
+		ic := c.(internalCollection[T])
+		reg := c.RegisterBatch(func(o []Event[T]) {
+			mergedEvents := make([]Event[T], 0, len(o))
+			for _, i := range o {
+				key := GetKey(i.Latest())
+				merged := j.GetKey(key)
+				switch i.Event {
+				case controllers.EventDelete:
+					mergedEvents = append(mergedEvents, getMergedDelete(i, merged))
+				case controllers.EventAdd:
+					mergedEvents = append(mergedEvents, getMergedAdd(i, merged))
+				case controllers.EventUpdate:
+					mergedEvents = append(mergedEvents, getMergedUpdate(i, merged))
+				}
+				f(mergedEvents)
+			}
+		}, runExistingState)
+		removes[ic.uid()] = reg.UnregisterHandler
+		syncers[ic.uid()] = reg
+	}
+	djhr := &dynamicJoinHandlerRegistration{
+		syncers: syncers,
+		removes: removes,
+	}
+
+	j.registerCollectionChangeHandlerLocked(func(e collectionChangeEvent[T]) {
+		djhr.Lock()
+		defer djhr.Unlock()
+		switch e.eventType {
+		case collectionMembershipEventAdd:
+			reg := e.collectionValue.RegisterBatch(func(o []Event[T]) {
+				mergedEvents := make([]Event[T], 0, len(o))
+				for _, i := range o {
+					key := GetKey(i.Latest())
+					merged := j.GetKey(key)
+					switch i.Event {
+					case controllers.EventDelete:
+						mergedEvents = append(mergedEvents, getMergedDelete(i, merged))
+					case controllers.EventAdd:
+						mergedEvents = append(mergedEvents, getMergedAdd(i, merged))
+					case controllers.EventUpdate:
+						mergedEvents = append(mergedEvents, getMergedUpdate(i, merged))
 					}
-					f(events)
-					return
 				}
-				// We're merging so this is a bit more complicated
-				items := make(map[Key[T]][]T)
-				// First loop through the collection to get the items by their keys
-				for _, c := range e.collectionValue.List() {
-					key := getTypedKey(c)
-					items[key] = append(items[key], c)
+				f(mergedEvents)
+			}, runExistingState)
+			djhr.removes[e.collectionValue.uid()] = reg.UnregisterHandler
+			djhr.syncers[e.collectionValue.uid()] = reg
+		case collectionMembershipEventDelete:
+			// Unregister the handler for this collection
+			remover := djhr.removes[e.collectionValue.uid()]
+			if remover == nil {
+				log.Warnf("Collection %v not found in %v", e.collectionValue.uid(), j.name())
+				return
+			}
+			remover()
+			delete(djhr.removes, e.collectionValue.uid())
+			delete(djhr.syncers, e.collectionValue.uid())
+
+			// Now send a final set of remove events for each object in the collection
+			var events []Event[T]
+			if j.merge == nil {
+				for _, elem := range e.collectionValue.List() {
+					events = append(events, Event[T]{Old: &elem, Event: controllers.EventDelete})
 				}
-				// Now loop through the keys and compare them to our current list of collections
-				// to see if it's actually deleted
-				for key, ts := range items {
-					res := j.GetKey(string(key))
-					m := j.merge(ts)
-					// If the result is nil, then it was deleted
-					if res == nil {
-						// Send a delete event for the merged versio nof this key
-						events = append(events, Event[T]{Old: m, Event: controllers.EventDelete})
-						continue
-					}
-					// There are some versions of this key still in the overall collection
-					// send an update with the new merged version
-					events = append(events, Event[T]{Old: m, New: res, Event: controllers.EventUpdate})
+				f(events)
+				return
+			}
+			// We're merging so this is a bit more complicated
+			items := make(map[Key[T]][]T)
+			// First loop through the collection to get the items by their keys
+			for _, c := range e.collectionValue.List() {
+				key := getTypedKey(c)
+				items[key] = append(items[key], c)
+			}
+			// Now loop through the keys and compare them to our current list of collections
+			// to see if it's actually deleted
+			for key, ts := range maps.SeqStable(items) {
+				res := j.GetKey(string(key))
+				m := j.merge(ts)
+				// If the result is nil, then it was deleted
+				if res == nil {
+					// Send a delete event for the merged version nof this key
+					events = append(events, Event[T]{Old: m, Event: controllers.EventDelete})
+					continue
 				}
-			}()
+				// There are some versions of this key still in the overall collection
+				// send an update with the new merged version
+				events = append(events, Event[T]{Old: m, New: res, Event: controllers.EventUpdate})
+			}
+			f(events)
 		}
 	})
 
@@ -259,10 +339,17 @@ func (j *nestedjoin[T]) registerCollectionChangeHandlerLocked(h func(e collectio
 	j.collectionChangeHandlers = append(j.collectionChangeHandlers, h)
 }
 
+// NestedJoinCollection creates a new collection of collections of T. Duplicate keys across the collections will *not*
+// be merged (see NestedJoinWithMergeCollection for that) and access operations (e.g. GetKey and List) will perform a
+// best effort stable ordering of the list of elements returned; however, this ordering will not be persistent across
+// istiod restarts.
 func NestedJoinCollection[T any](collections Collection[Collection[T]], opts ...CollectionOption) Collection[T] {
 	return NestedJoinWithMergeCollection(collections, nil, opts...)
 }
 
+// NestedJoinWithMergeCollection creates a new collection of collections of T that combines duplicates with the specified merge function.
+// The merge function *cannot* assume a stable ordering of the list of elements passed to it. Therefore, access operations (e.g. GetKey and List) will
+// will only be deterministic if the merge function is deterministic. The merge function should return nil if no value should be returned.
 func NestedJoinWithMergeCollection[T any](collections Collection[Collection[T]], merge func(ts []T) *T, opts ...CollectionOption) Collection[T] {
 	o := buildCollectionOptions(opts...)
 	if o.name == "" {
@@ -297,6 +384,7 @@ func NestedJoinWithMergeCollection[T any](collections Collection[Collection[T]],
 						continue
 					}
 					h(collectionChangeEvent[T]{eventType: collectionMembershipEventAdd, collectionValue: any(*e.New).(internalCollection[T])})
+				// TODO: What does a collection/informer update even look like? New KubeConfig?
 				case controllers.EventUpdate:
 					if e.New == nil || e.Old == nil {
 						log.Warnf("Event %v either has no New value or no Old value", e.Event)

@@ -17,6 +17,7 @@ package krt
 import (
 	"fmt"
 
+	"istio.io/istio/pkg/kube/controllers"
 	"istio.io/istio/pkg/kube/kclient"
 	"istio.io/istio/pkg/ptr"
 	"istio.io/istio/pkg/slices"
@@ -93,23 +94,23 @@ func (j *join[T]) quickList() []T {
 }
 
 func (j *join[T]) mergeList() []T {
-	res := map[Key[T]][]T{}
+	unmergedByKey := map[Key[T]][]T{}
 	for _, c := range j.collections {
 		for _, i := range c.List() {
 			key := getTypedKey(i)
-			res[key] = append(res[key], i)
+			unmergedByKey[key] = append(unmergedByKey[key], i)
 		}
 	}
 
-	var l []T
-	for _, ts := range res {
+	merged := make([]T, 0, len(unmergedByKey))
+	for _, ts := range unmergedByKey {
 		m := j.merge(ts)
 		if m != nil {
-			l = append(l, *m)
+			merged = append(merged, *m)
 		}
 	}
 
-	return l
+	return merged
 }
 
 func (j *join[T]) List() []T {
@@ -124,7 +125,7 @@ func (j *join[T]) Register(f func(o Event[T])) HandlerRegistration {
 	return registerHandlerAsBatched[T](j, f)
 }
 
-func (j *join[T]) RegisterBatch(f func(o []Event[T]), runExistingState bool) HandlerRegistration {
+func (j *join[T]) registerBatchUnmerged(f func(o []Event[T]), runExistingState bool) HandlerRegistration {
 	sync := multiSyncer{}
 	removes := []func(){}
 	for _, c := range j.collections {
@@ -136,6 +137,90 @@ func (j *join[T]) RegisterBatch(f func(o []Event[T]), runExistingState bool) Han
 		Syncer:  sync,
 		removes: removes,
 	}
+}
+
+func getMergedDelete[T any](e Event[T], merged *T) Event[T] {
+	if merged == nil {
+		// This is expected if the item is globally deleted
+		// across all collections. Use the original delete
+		// event.
+		return e
+	}
+	// There are items for this key in other collections. This delete is actually
+	// an update. The Old isn't 100% accurate since we can't see what the old merged
+	// value was, but handlers probably shouldn't be doing manual diffing to the point
+	// where this would actually matter.
+	return Event[T]{
+		Event: controllers.EventUpdate,
+		Old:   e.Old,
+		New:   merged,
+	}
+}
+
+func getMergedAdd[T any](e Event[T], merged *T) Event[T] {
+	// Merged should never be nil after an add
+	if merged == nil {
+		log.Warnf("JoinCollection: merge function returned nil for add event %v", e)
+	}
+	if equal(*e.New, *merged) {
+		// This is likely a legitimate add event since the merged version is the same
+		// as the new version. Send the original add event.
+		return e
+	}
+	// This is an update triggered by the add of a duplicate item.
+	// We use the added item as the old value as a best effort.
+	return Event[T]{
+		Event: controllers.EventUpdate,
+		Old:   e.New,
+		New:   merged,
+	}
+}
+
+func getMergedUpdate[T any](e Event[T], merged *T) Event[T] {
+	if merged == nil {
+		log.Warnf("JoinCollection: merge function returned nil for update event %v", e)
+	}
+	// This is an update triggered by the add of a duplicate item.
+	// We use the added item as the old value as a best effort.
+	return Event[T]{
+		Event: controllers.EventUpdate,
+		Old:   e.Old,
+		New:   merged,
+	}
+}
+
+func (j *join[T]) RegisterBatch(f func(o []Event[T]), runExistingState bool) HandlerRegistration {
+	if j.merge != nil {
+		sync := multiSyncer{}
+		removes := []func(){}
+
+		for _, c := range j.collections {
+			reg := c.RegisterBatch(func(o []Event[T]) {
+				mergedEvents := make([]Event[T], 0, len(o))
+				for _, i := range o {
+					key := GetKey(i.Latest())
+					merged := j.GetKey(key)
+					switch i.Event {
+					case controllers.EventDelete:
+						mergedEvents = append(mergedEvents, getMergedDelete(i, merged))
+					case controllers.EventAdd:
+						mergedEvents = append(mergedEvents, getMergedAdd(i, merged))
+					case controllers.EventUpdate:
+						mergedEvents = append(mergedEvents, getMergedUpdate(i, merged))
+					}
+				}
+				f(mergedEvents)
+			}, runExistingState)
+			removes = append(removes, reg.UnregisterHandler)
+			sync.syncers = append(sync.syncers, reg)
+		}
+		return joinHandlerRegistration{
+			Syncer:  sync,
+			removes: removes,
+		}
+	}
+
+	return j.registerBatchUnmerged(f, runExistingState)
 }
 
 type joinHandlerRegistration struct {
@@ -216,6 +301,9 @@ func (j *join[T]) WaitUntilSynced(stop <-chan struct{}) bool {
 
 // JoinCollection combines multiple Collection[T] into a single
 // Collection[T], picking the first object found when duplicates are found.
+// Access operations (e.g. GetKey and List) will perform a best effort stable ordering
+// of the list of elements returned; however, this ordering will not be persistent across
+// istiod restarts.
 func JoinCollection[T any](cs []Collection[T], opts ...CollectionOption) Collection[T] {
 	return JoinWithMergeCollection[T](cs, nil, opts...)
 }
@@ -223,6 +311,9 @@ func JoinCollection[T any](cs []Collection[T], opts ...CollectionOption) Collect
 // JoinWithMergeCollection combines multiple Collection[T] into a single
 // Collection[T] merging equal objects into one record
 // in the resulting Collection based on the provided merge function.
+//
+// The merge function *cannot* assume a stable ordering of the list of elements passed to it. Therefore, access operations (e.g. GetKey and List) will
+// will only be deterministic if the merge function is deterministic. The merge function should return nil if no value should be returned.
 func JoinWithMergeCollection[T any](cs []Collection[T], merge func(ts []T) *T, opts ...CollectionOption) Collection[T] {
 	o := buildCollectionOptions(opts...)
 	if o.name == "" {

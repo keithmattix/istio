@@ -366,6 +366,8 @@ func TestNestedJoinWithMergeSimpleCollection(t *testing.T) {
 			krt.WithName("AllServices"),
 		)...,
 	)
+	tt := assert.NewTracker[string](t)
+	AllServices.Register(TrackerHandler[SimpleService](tt))
 	c.RunAndWait(opts.Stop())
 	assert.EventuallyEqual(t, func() bool {
 		return AllServices.WaitUntilSynced(opts.Stop())
@@ -403,4 +405,35 @@ func TestNestedJoinWithMergeSimpleCollection(t *testing.T) {
 		Named:    Named{"namespace", "svc"},
 		Selector: map[string]string{"app": "foo", "version": "v1"},
 	})
+
+	// Have to wait a bit for the events to propagate due to client syncing
+	// But what we want is the original add and then an update because the
+	// merged value changed
+	tt.WaitOrdered("add/namespace/svc", "update/namespace/svc")
+
+	svc3 := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "svc",
+			Namespace: "namespace",
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{"app": "bar", "version": "v1"},
+			Ports: []corev1.ServicePort{
+				{Name: "http", Port: 80, TargetPort: intstr.FromInt(8080)},
+			},
+			ClusterIP: "1.2.3.4",
+		},
+	}
+
+	c3 := kube.NewFakeClient(svc3)
+	services3 := krt.NewInformer[*corev1.Service](c3, opts.WithName("Services")...)
+	SimpleServices3 := krt.NewCollection(services3, func(ctx krt.HandlerContext, o *corev1.Service) *SimpleService {
+		return &SimpleService{
+			Named:    Named{o.Namespace, o.Name},
+			Selector: o.Spec.Selector,
+		}
+	}, opts.WithName("SimpleServices3")...)
+	c2.RunAndWait(opts.Stop())
+
+	MultiServices.UpdateObject(SimpleServices3)
 }
