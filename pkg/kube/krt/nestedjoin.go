@@ -203,6 +203,44 @@ func (j *nestedjoin[T]) registerBatchUnmerged(f func(o []Event[T]), runExistingS
 			}
 			f(events)
 			return
+		case collectionMembershipEventUpdate:
+			// Get all of the elements in the old collection
+			oldItems := e.oldCollectionValue.List()
+			// Convert it to a sparse map for easy lookup
+			oldItemsMap := make(map[Key[T]]T, len(oldItems))
+			for _, i := range oldItems {
+				key := getTypedKey(i)
+				oldItemsMap[key] = i
+			}
+			// Now loop through the new collection and compare it to the old one
+			seen := sets.NewWithLength[string](len(oldItems))
+			finalEvents := make([]Event[T], 0, len(oldItems))
+			for _, i := range e.collectionValue.List() {
+				key := getTypedKey(i)
+				// If we see it in the old collection, then it's an update
+				if oldItem, ok := oldItemsMap[key]; ok {
+					seen.Insert(string(key))
+					// Send an update event for the new version of this key
+					finalEvents = append(finalEvents, Event[T]{Old: &oldItem, New: &i, Event: controllers.EventUpdate})
+					// Delete it from the old items map
+					delete(oldItemsMap, key)
+				} else {
+					if seen.Contains(string(key)) {
+						// This is a duplicate item in the new collection, skip it
+						log.Warnf("NestedJoinCollection: Duplicate item %v in updated collection, skipping", key)
+						continue
+					}
+					// This is a new item
+					finalEvents = append(finalEvents, Event[T]{New: &i, Event: controllers.EventAdd})
+				}
+			}
+			// Now loop through the old items map and send delete events for any items that
+			// are no longer in the new collection
+			for _, i := range maps.SeqStable(oldItemsMap) {
+				finalEvents = append(finalEvents, Event[T]{Old: &i, Event: controllers.EventDelete})
+			}
+
+			f(finalEvents)
 		}
 	})
 
@@ -280,13 +318,6 @@ func (j *nestedjoin[T]) RegisterBatch(f func(o []Event[T]), runExistingState boo
 
 			// Now send a final set of remove events for each object in the collection
 			var events []Event[T]
-			if j.merge == nil {
-				for _, elem := range e.collectionValue.List() {
-					events = append(events, Event[T]{Old: &elem, Event: controllers.EventDelete})
-				}
-				f(events)
-				return
-			}
 			// We're merging so this is a bit more complicated
 			items := make(map[Key[T]][]T)
 			// First loop through the collection to get the items by their keys
@@ -310,6 +341,50 @@ func (j *nestedjoin[T]) RegisterBatch(f func(o []Event[T]), runExistingState boo
 				events = append(events, Event[T]{Old: m, New: res, Event: controllers.EventUpdate})
 			}
 			f(events)
+		case collectionMembershipEventUpdate:
+			// Get all of the elements in the old collection
+			oldItems := e.oldCollectionValue.List()
+			// Convert it to a sparse map for easy lookup
+			oldItemsMap := make(map[Key[T]]T, len(oldItems))
+			for _, i := range oldItems {
+				key := getTypedKey(i)
+				oldItemsMap[key] = i
+			}
+			// Now loop through the new collection and compare it to the old one
+			seen := sets.NewWithLength[string](len(oldItems))
+			finalEvents := make([]Event[T], 0, len(oldItems))
+			for _, i := range e.collectionValue.List() {
+				key := getTypedKey(i)
+				// If we see it in the old collection, then it's an update
+				if oldItem, ok := oldItemsMap[key]; ok {
+					seen.Insert(string(key))
+					merged := j.GetKey(string(key))
+					if merged == nil {
+						// This shouldn't happen, log it
+						log.Warnf("NestedJoinCollection: Merged item %v is nil after a collection update. Falling back to collection specific version", key)
+						merged = &i
+					}
+					// Send an update event for the merged version of this key
+					finalEvents = append(finalEvents, Event[T]{Old: &oldItem, New: merged, Event: controllers.EventUpdate})
+					// Delete it from the old items map
+					delete(oldItemsMap, key)
+				} else {
+					if seen.Contains(string(key)) {
+						// This is a duplicate item in the new collection, skip it
+						log.Warnf("NestedJoinCollection: Duplicate item %v in updated collection, skipping", key)
+						continue
+					}
+					// This is a new item
+					finalEvents = append(finalEvents, Event[T]{New: &i, Event: controllers.EventAdd})
+				}
+			}
+			// Now loop through the old items map and send delete events for any items that
+			// are no longer in the new collection
+			for _, i := range maps.SeqStable(oldItemsMap) {
+				finalEvents = append(finalEvents, Event[T]{Old: &i, Event: controllers.EventDelete})
+			}
+
+			f(finalEvents)
 		}
 	})
 
@@ -384,20 +459,18 @@ func NestedJoinWithMergeCollection[T any](collections Collection[Collection[T]],
 						continue
 					}
 					h(collectionChangeEvent[T]{eventType: collectionMembershipEventAdd, collectionValue: any(*e.New).(internalCollection[T])})
-				// TODO: What does a collection/informer update even look like? New KubeConfig?
+				// TODO: What does a collection/informer update even look like?
+				// I'm assuming it's something like a change in informer filter
+				// or something and the uid stays the same.
 				case controllers.EventUpdate:
 					if e.New == nil || e.Old == nil {
 						log.Warnf("Event %v either has no New value or no Old value", e.Event)
 						continue
 					}
-					// Send a delete and then an add
 					h(collectionChangeEvent[T]{
-						eventType:       collectionMembershipEventDelete,
-						collectionValue: any(*e.Old).(internalCollection[T]),
-					})
-					h(collectionChangeEvent[T]{
-						eventType:       collectionMembershipEventAdd,
-						collectionValue: any(*e.New).(internalCollection[T]),
+						eventType:          collectionMembershipEventDelete,
+						collectionValue:    any(*e.New).(internalCollection[T]),
+						oldCollectionValue: any(*e.Old).(internalCollection[T]),
 					})
 				case controllers.EventDelete:
 					if e.Old == nil {

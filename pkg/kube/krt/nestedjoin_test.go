@@ -411,29 +411,20 @@ func TestNestedJoinWithMergeSimpleCollection(t *testing.T) {
 	// merged value changed
 	tt.WaitOrdered("add/namespace/svc", "update/namespace/svc")
 
-	svc3 := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "svc",
-			Namespace: "namespace",
+	// Now delete one of the collections
+	MultiServices.DeleteObject(krt.GetKey(SimpleServices2))
+	// This should be another update event, not a delete event
+	tt.WaitOrdered("update/namespace/svc")
+	assert.EventuallyEqual(t, func() *SimpleService {
+		return AllServices.GetKey("namespace/svc")
+	},
+		&SimpleService{
+			Named:    Named{"namespace", "svc"},
+			Selector: map[string]string{"app": "foo"},
 		},
-		Spec: corev1.ServiceSpec{
-			Selector: map[string]string{"app": "bar", "version": "v1"},
-			Ports: []corev1.ServicePort{
-				{Name: "http", Port: 80, TargetPort: intstr.FromInt(8080)},
-			},
-			ClusterIP: "1.2.3.4",
-		},
-	}
+	)
 
-	c3 := kube.NewFakeClient(svc3)
-	services3 := krt.NewInformer[*corev1.Service](c3, opts.WithName("Services")...)
-	SimpleServices3 := krt.NewCollection(services3, func(ctx krt.HandlerContext, o *corev1.Service) *SimpleService {
-		return &SimpleService{
-			Named:    Named{o.Namespace, o.Name},
-			Selector: o.Spec.Selector,
-		}
-	}, opts.WithName("SimpleServices3")...)
-	c2.RunAndWait(opts.Stop())
-
-	MultiServices.UpdateObject(SimpleServices3)
+	// Now delete the other collection; this should be a delete event
+	MultiServices.DeleteObject(krt.GetKey(SimpleServices))
+	tt.WaitOrdered("delete/namespace/svc")
 }
