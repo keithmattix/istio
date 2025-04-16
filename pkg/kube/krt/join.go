@@ -158,14 +158,15 @@ func getMergedDelete[T any](e Event[T], merged *T) Event[T] {
 }
 
 func getMergedAdd[T any](e Event[T], merged *T) Event[T] {
-	// Merged should never be nil after an add
-	if merged == nil {
-		log.Warnf("JoinCollection: merge function returned nil for add event %v", e)
-	}
-	if equal(*e.New, *merged) {
+	if merged != nil && equal(*e.New, *merged) {
 		// This is likely a legitimate add event since the merged version is the same
 		// as the new version. Send the original add event.
 		return e
+	}
+	// Merged should never be nil after an add; log it in case we come across this
+	// in the future.
+	if merged == nil {
+		log.Warnf("JoinCollection: merge function returned nil for add event %v", e)
 	}
 	// This is an update triggered by the add of a duplicate item.
 	// We use the added item as the old value as a best effort.
