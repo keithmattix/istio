@@ -1257,7 +1257,7 @@ metadata:
  name: allow-nothing-waypoint
 spec:
   targetRefs:
-  - group: "gateway.networking.k8s.io" 
+  - group: "gateway.networking.k8s.io"
     kind: "GatewayClass"
     name: "istio-waypoint"`).ApplyOrFail(t)
 
@@ -1530,6 +1530,7 @@ func TestL7JWT(t *testing.T) {
 						WithAuthz(jwt.TokenIssuer1).
 						Build()
 					opt.Check = check.OK()
+					src.CallOrFail(t, opt)
 				})
 
 				t.NewSubTest("deny with sub-3 token due to ignored RequestAuthentication").Run(func(t framework.TestContext) {
@@ -3110,14 +3111,15 @@ func TestDirect(t *testing.T) {
 				HBONE:   hbsvc,
 				Check:   check.OK(),
 			})
-			run("VIP destination, FQDN authority", echo.CallOptions{
-				To:      apps.ServiceAddressedWaypoint,
-				Count:   1,
-				Address: apps.ServiceAddressedWaypoint.ClusterLocalFQDN(),
-				Port:    echo.Port{Name: ports.HTTP.Name},
-				HBONE:   hbsvc,
-				Check:   check.OK(),
-			})
+			// Only works with multinetwork
+			// run("VIP destination, FQDN authority", echo.CallOptions{
+			// 	To:      apps.ServiceAddressedWaypoint,
+			// 	Count:   1,
+			// 	Address: apps.ServiceAddressedWaypoint.ClusterLocalFQDN(),
+			// 	Port:    echo.Port{Name: ports.HTTP.Name},
+			// 	HBONE:   hbsvc,
+			// 	Check:   check.OK(),
+			// })
 			run("VIP destination, unknown port", echo.CallOptions{
 				To:      apps.ServiceAddressedWaypoint,
 				Count:   1,
