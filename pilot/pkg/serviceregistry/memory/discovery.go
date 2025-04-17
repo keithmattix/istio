@@ -16,6 +16,7 @@ package memory
 
 import (
 	"fmt"
+	"net/netip"
 	"sync"
 
 	"istio.io/istio/pilot/pkg/model"
@@ -25,7 +26,9 @@ import (
 	"istio.io/istio/pkg/config/labels"
 	"istio.io/istio/pkg/config/protocol"
 	"istio.io/istio/pkg/log"
+	"istio.io/istio/pkg/maps"
 	"istio.io/istio/pkg/slices"
+	"istio.io/istio/pkg/util/sets"
 	"istio.io/istio/pkg/workloadapi"
 )
 
@@ -337,6 +340,53 @@ func (sd *ServiceDiscovery) Run(<-chan struct{}) {}
 
 // HasSynced always returns true
 func (sd *ServiceDiscovery) HasSynced() bool { return true }
+
+func (sd *ServiceDiscovery) AddressInformation(requests sets.String) ([]model.AddressInfo, sets.String) {
+	sd.mutex.Lock()
+	defer sd.mutex.Unlock()
+	if len(requests) == 0 {
+		return maps.Values(sd.addresses), nil
+	}
+
+	var infos []model.AddressInfo
+	removed := sets.String{}
+	for req := range requests {
+		if _, found := sd.addresses[req]; !found {
+			removed.Insert(req)
+		} else {
+			infos = append(infos, sd.addresses[req])
+		}
+	}
+	return infos, removed
+}
+
+func (sd *ServiceDiscovery) AdditionalPodSubscriptions(
+	*model.Proxy,
+	sets.String,
+	sets.String,
+) sets.String {
+	return nil
+}
+
+func (sd *ServiceDiscovery) Policies(sets.Set[model.ConfigKey]) []model.WorkloadAuthorization {
+	return nil
+}
+
+func (sd *ServiceDiscovery) ServicesForWaypoint(model.WaypointKey) []model.ServiceInfo {
+	return nil
+}
+
+func (sd *ServiceDiscovery) ServicesWithWaypoint(string) []model.ServiceWaypointInfo {
+	return nil
+}
+
+func (sd *ServiceDiscovery) Waypoint(string, string) []netip.Addr {
+	return nil
+}
+
+func (sd *ServiceDiscovery) WorkloadsForWaypoint(model.WaypointKey) []model.WorkloadInfo {
+	return nil
+}
 
 func (sd *ServiceDiscovery) AddWorkloadInfo(infos ...*model.WorkloadInfo) {
 	sd.mutex.Lock()

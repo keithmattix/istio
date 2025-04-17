@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"net/netip"
 	"regexp"
 	"sort"
 	"strconv"
@@ -90,65 +89,14 @@ func NewEnvironment() *Environment {
 		cache = DisabledCache{}
 	}
 	return &Environment{
-		pushContext:    NewPushContext(),
-		Cache:          cache,
-		EndpointIndex:  NewEndpointIndex(cache),
-		AmbientIndexes: NoopAmbientIndexes{},
+		pushContext:   NewPushContext(),
+		Cache:         cache,
+		EndpointIndex: NewEndpointIndex(cache),
 	}
 }
 
 // Watcher is a type alias to keep the embedded type name stable.
 type Watcher = meshwatcher.WatcherCollection
-
-type AmbientIndexes interface {
-	ServicesWithWaypoint(key string) []ServiceWaypointInfo
-	AddressInformation(addresses sets.String) ([]AddressInfo, sets.String)
-	AdditionalPodSubscriptions(
-		proxy *Proxy,
-		allAddresses sets.String,
-		currentSubs sets.String,
-	) sets.String
-	Policies(requested sets.Set[ConfigKey]) []WorkloadAuthorization
-	ServicesForWaypoint(WaypointKey) []ServiceInfo
-	WorkloadsForWaypoint(WaypointKey) []WorkloadInfo
-}
-
-// NoopAmbientIndexes provides an implementation of AmbientIndexes that always returns nil, to easily "skip" it.
-type NoopAmbientIndexes struct{}
-
-func (u NoopAmbientIndexes) AddressInformation(sets.String) ([]AddressInfo, sets.String) {
-	return nil, nil
-}
-
-func (u NoopAmbientIndexes) AdditionalPodSubscriptions(
-	*Proxy,
-	sets.String,
-	sets.String,
-) sets.String {
-	return nil
-}
-
-func (u NoopAmbientIndexes) Policies(sets.Set[ConfigKey]) []WorkloadAuthorization {
-	return nil
-}
-
-func (u NoopAmbientIndexes) ServicesForWaypoint(WaypointKey) []ServiceInfo {
-	return nil
-}
-
-func (u NoopAmbientIndexes) Waypoint(string, string) []netip.Addr {
-	return nil
-}
-
-func (u NoopAmbientIndexes) WorkloadsForWaypoint(WaypointKey) []WorkloadInfo {
-	return nil
-}
-
-func (u NoopAmbientIndexes) ServicesWithWaypoint(string) []ServiceWaypointInfo {
-	return nil
-}
-
-var _ AmbientIndexes = NoopAmbientIndexes{}
 
 // Environment provides an aggregate environmental API for Pilot
 type Environment struct {
@@ -160,8 +108,6 @@ type Environment struct {
 
 	// Watcher is the watcher for the mesh config (to be merged into the config store)
 	Watcher
-
-	AmbientIndexes
 
 	// NetworksWatcher (loaded from a config map) provides information about the
 	// set of networks inside a mesh and how to route to endpoints in each

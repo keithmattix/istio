@@ -907,7 +907,58 @@ type ServiceDiscovery interface {
 	// Kubernetes Multi-Cluster Services (MCS) ServiceExport API. Only applies to services in
 	// Kubernetes clusters.
 	MCSServices() []MCSServiceInfo
+	AmbientIndexes
 }
+
+type AmbientIndexes interface {
+	ServicesWithWaypoint(key string) []ServiceWaypointInfo
+	AddressInformation(addresses sets.String) ([]AddressInfo, sets.String)
+	AdditionalPodSubscriptions(
+		proxy *Proxy,
+		allAddresses sets.String,
+		currentSubs sets.String,
+	) sets.String
+	Policies(requested sets.Set[ConfigKey]) []WorkloadAuthorization
+	ServicesForWaypoint(WaypointKey) []ServiceInfo
+	WorkloadsForWaypoint(WaypointKey) []WorkloadInfo
+}
+
+// NoopAmbientIndexes provides an implementation of AmbientIndexes that always returns nil, to easily "skip" it.
+type NoopAmbientIndexes struct{}
+
+func (u NoopAmbientIndexes) AddressInformation(sets.String) ([]AddressInfo, sets.String) {
+	return nil, nil
+}
+
+func (u NoopAmbientIndexes) AdditionalPodSubscriptions(
+	*Proxy,
+	sets.String,
+	sets.String,
+) sets.String {
+	return nil
+}
+
+func (u NoopAmbientIndexes) Policies(sets.Set[ConfigKey]) []WorkloadAuthorization {
+	return nil
+}
+
+func (u NoopAmbientIndexes) ServicesForWaypoint(WaypointKey) []ServiceInfo {
+	return nil
+}
+
+func (u NoopAmbientIndexes) Waypoint(string, string) []netip.Addr {
+	return nil
+}
+
+func (u NoopAmbientIndexes) WorkloadsForWaypoint(WaypointKey) []WorkloadInfo {
+	return nil
+}
+
+func (u NoopAmbientIndexes) ServicesWithWaypoint(string) []ServiceWaypointInfo {
+	return nil
+}
+
+var _ AmbientIndexes = NoopAmbientIndexes{}
 
 // WaypointKey is a multi-address extension of NetworkAddress which is commonly used for lookups in AmbientIndex
 // We likely need to consider alternative keying options internally such as hostname as we look to expand beyond istio-waypoint

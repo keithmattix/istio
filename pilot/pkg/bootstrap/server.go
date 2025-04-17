@@ -51,7 +51,6 @@ import (
 	sec_model "istio.io/istio/pilot/pkg/security/model"
 	"istio.io/istio/pilot/pkg/server"
 	"istio.io/istio/pilot/pkg/serviceregistry/aggregate"
-	"istio.io/istio/pilot/pkg/serviceregistry/kube/controller/ambient"
 	"istio.io/istio/pilot/pkg/serviceregistry/provider"
 	"istio.io/istio/pilot/pkg/serviceregistry/serviceentry"
 	"istio.io/istio/pilot/pkg/status"
@@ -325,25 +324,6 @@ func NewServer(args *PilotArgs, initFuncs ...func(*Server)) (*Server, error) {
 
 	if err := s.initControllers(args); err != nil {
 		return nil, err
-	}
-
-	// Needs to be after initControllers so we can get the status writer
-	if features.EnableAmbient {
-		e.AmbientIndexes = ambient.New(ambient.Options{
-			Client:          s.kubeClient,
-			SystemNamespace: args.Namespace,
-			DomainSuffix:    s.environment.DomainSuffix,
-			ClusterID:       s.clusterID,
-			Revision:        args.Revision,
-			XDSUpdater:      s.XDSServer,
-			MeshConfig:      e.Watcher,
-			StatusNotifier:  args.RegistryOptions.KubeOptions.StatusWritingEnabled,
-			Debugger:        args.KrtDebugger,
-			Flags: ambient.FeatureFlags{
-				DefaultAllowFromWaypoint:              features.DefaultAllowFromWaypoint,
-				EnableK8SServiceSelectWorkloadEntries: features.EnableK8SServiceSelectWorkloadEntries,
-			},
-		})
 	}
 
 	InitGenerators(s.XDSServer, configGen, args.Namespace, s.clusterID, s.internalDebugMux)
