@@ -197,17 +197,6 @@ func (a *index) serviceEntryServiceBuilder(
 	}
 }
 
-func serviceEntryServiceBuilder(
-	waypoints krt.Collection[Waypoint],
-	namespaces krt.Collection[*v1.Namespace],
-	networkGetter func(ctx krt.HandlerContext) network.ID,
-) krt.TransformationMulti[*networkingclient.ServiceEntry, model.ServiceInfo] {
-	return func(ctx krt.HandlerContext, s *networkingclient.ServiceEntry) []model.ServiceInfo {
-		waypoint, waypointError := fetchWaypointForService(ctx, waypoints, namespaces, s.ObjectMeta)
-		return serviceEntriesInfo(ctx, s, waypoint, waypointError, networkGetter)
-	}
-}
-
 func serviceEntriesInfo(
 	ctx krt.HandlerContext,
 	s *networkingclient.ServiceEntry,

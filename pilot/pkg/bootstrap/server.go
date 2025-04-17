@@ -344,6 +344,8 @@ func NewServer(args *PilotArgs, initFuncs ...func(*Server)) (*Server, error) {
 				EnableK8SServiceSelectWorkloadEntries: features.EnableK8SServiceSelectWorkloadEntries,
 			},
 		})
+	} else {
+		e.AmbientIndexes = &model.NoopAmbientIndexes{}
 	}
 
 	InitGenerators(s.XDSServer, configGen, args.Namespace, s.clusterID, s.internalDebugMux)
