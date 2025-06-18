@@ -204,6 +204,11 @@ func (cb *ClusterBuilder) buildWaypointInboundVIPCluster(
 	}
 	maybeApplyEdsConfig(localCluster.cluster)
 
+	// If inference semantics are enabled, undo everything we just did
+	if svc.UseInferenceSemantics() {
+		cb.applyOverrideHostPolicy(localCluster)
+	}
+
 	// TLS and PROXY are more involved, since these impact the transport socket which is customized for HBONE.
 	opts := &buildClusterOpts{
 		mesh:           cb.req.Push.Mesh,
