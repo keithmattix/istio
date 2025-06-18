@@ -935,6 +935,12 @@ func (lb *ListenerBuilder) translateWaypointRoute(
 			return lb
 		},
 	}
+
+	if features.SupportGatewayAPIInferenceExtension {
+		// InferencePool is enabled; check if we needto add extproc
+		opts.InferencePoolExtensionRefs = istio_route.CheckAndGetInferencePoolConfigs(virtualService)
+	}
+
 	return istio_route.TranslateRoute(
 		lb.node,
 		in,

@@ -1636,11 +1636,9 @@ func CheckAndGetInferencePoolConfigs(virtualService config.Config) map[string]st
 	for _, httpRoute := range vs.Http {
 		routeNameParts := strings.Split(httpRoute.Name, "%%")
 		if len(routeNameParts) > 2 {
-			// TODO(liorlieberman): support configurable domain names
-			fqdn := fmt.Sprintf("%s.%s.svc.%s", routeNameParts[1], virtualService.Namespace, "cluster.local")
+			fqdn := fmt.Sprintf("%s.%s.svc.%s", routeNameParts[1], virtualService.Namespace, virtualService.Domain)
 			ipcfg := fqdn + ":" + routeNameParts[2]
 			infPoolConfigs[httpRoute.Name] = ipcfg
-
 		}
 	}
 	return infPoolConfigs
