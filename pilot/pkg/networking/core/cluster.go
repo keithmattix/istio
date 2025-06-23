@@ -709,7 +709,8 @@ func convertResolution(proxyType model.NodeType, service *model.Service) cluster
 		return cluster.Cluster_LOGICAL_DNS
 	case model.Passthrough:
 		// Gateways cannot use passthrough clusters. So fallback to EDS
-		if proxyType == model.Router {
+		isInference := features.SupportGatewayAPIInferenceExtension && service.UseInferenceSemantics()
+		if proxyType == model.Router || (proxyType == model.Waypoint && isInference) {
 			return cluster.Cluster_EDS
 		}
 		if service.Attributes.ServiceRegistry == provider.Kubernetes && features.EnableEDSForHeadless {

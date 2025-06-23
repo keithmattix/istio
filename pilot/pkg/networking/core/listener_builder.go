@@ -405,7 +405,7 @@ func (lb *ListenerBuilder) buildHTTPConnectionManager(httpOpts *httpListenerOpts
 		filters = extension.PopAppendHTTP(filters, wasm, extensions.PluginPhase_UNSPECIFIED_PHASE)
 		// TODO(liorlieberman): add model router || waypoint condition, the reason its not added is because it fails tests
 		// due to https://github.com/istio/istio/blob/d0d8d97fba2425810d328379dfc9887f096be68b/pilot/pkg/model/context.go#L544-L546
-		if enableStr, ok := lb.node.Labels["distio.io/enable-inference-extproc"]; ok && enableStr == "true" {
+		if enableStr, ok := lb.node.Labels["istio.io/enable-inference-extproc"]; ok && enableStr == "true" {
 			filters = append(filters, xdsfilters.InferencePoolExtProc)
 		}
 	}

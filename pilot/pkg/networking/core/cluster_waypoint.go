@@ -205,7 +205,7 @@ func (cb *ClusterBuilder) buildWaypointInboundVIPCluster(
 	maybeApplyEdsConfig(localCluster.cluster)
 
 	// If inference semantics are enabled, undo everything we just did
-	if svc.UseInferenceSemantics() {
+	if features.SupportGatewayAPIInferenceExtension && svc.UseInferenceSemantics() {
 		cb.applyOverrideHostPolicy(localCluster)
 	}
 
