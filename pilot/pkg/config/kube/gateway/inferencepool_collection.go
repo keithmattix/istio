@@ -100,8 +100,7 @@ func (i InferencePool) ResourceName() string {
 	return i.shadowService.key.String()
 }
 
-func InferencePoolServiceCollection(
-	services krt.Collection[*corev1.Service],
+func InferencePoolServiceImportCollection(
 	serviceImports krt.Collection[controllers.Object],
 	httpRoutes krt.Collection[*gateway.HTTPRoute],
 	gateways krt.Collection[*gateway.Gateway],
@@ -109,67 +108,8 @@ func InferencePoolServiceCollection(
 	c *Controller,
 	opts krt.OptionsBuilder,
 ) krt.Collection[InferencePool] {
-	// These are manually updated Service resources that we want to treat as InferencePools.
-	serviceInferencePools := krt.NewCollection(services, func(ctx krt.HandlerContext, svc *corev1.Service) *InferencePool {
-		// Only process services labeled as inference pools
-		if svc.Labels[constants.InternalServiceSemantics] != constants.ServiceSemanticsInferencePool {
-			return nil
-		}
-		// Skip services that have the InferencePoolRefLabel, as those are shadow services
-		// and we don't want to count those twice
-		if _, hasInferencePoolLabel := svc.Labels[InferencePoolRefLabel]; hasInferencePoolLabel {
-			return nil
-		}
-
-		port, err := strconv.ParseInt(svc.Labels[InferencePoolExtensionRefPort], 10, 32)
-		if err != nil {
-			log.Errorf("skipping pseudo-inference pool service %s/%s, invalid port: %v", svc.Namespace, svc.Name, err)
-			return nil
-		}
-
-		// TODO: None of this may be necessary; I think all this collection is used for is to check
-		// the presence of the InferencePool on the gateway since we aren't creating shadow services here.
-		extRef := extRefInfo{
-			name: svc.Labels[InferencePoolExtensionRefSvc],
-			port: int32(port),
-		}
-
-		extRef.failureMode = string(inferencev1.EndpointPickerFailClose) // Default failure mode
-		if failureMode, ok := svc.Labels[InferencePoolExtensionRefFailureMode]; ok {
-			extRef.failureMode = failureMode
-		}
-
-		if extRef.name == "" || extRef.port == 0 {
-			log.Errorf("skipping pseudo-inference pool service %s/%s, missing required labels", svc.Namespace, svc.Name)
-		}
-
-		targetPorts := make([]targetPort, 0, len(svc.Spec.Ports))
-		for _, port := range svc.Spec.Ports {
-			targetPorts = append(targetPorts, targetPort{port: port.TargetPort.IntVal})
-		}
-
-		routeList := krt.Fetch(ctx, httpRoutes, krt.FilterIndex(routesByServiceOrServiceImport, svc.Namespace+"/"+svc.Name))
-
-		// Find gateway parents that reference this InferencePool through HTTPRoutes
-		gatewayParents := findGatewayParents(svc, routeList, isServiceBackendRef)
-		return &InferencePool{
-			// In this case, this is an actual service
-			// Don't need poolName or poolUID fields
-			// since there's no owner reference
-			shadowService: shadowServiceInfo{
-				key: types.NamespacedName{
-					Name:      svc.Name,
-					Namespace: svc.Namespace,
-				},
-				// N.B We're not creating a shadow service, so selector is not needed
-				// Similar logic applies to targetPort.
-			},
-			extRef:         extRef,
-			gatewayParents: gatewayParents,
-		}
-	}, opts.WithName("InferencePoolService")...)
-
-	serviceImportInferencePools := krt.NewCollection(serviceImports, func(ctx krt.HandlerContext, obj controllers.Object) *InferencePool {
+	// These are manually updated ServiceImport resources that we want to treat as InferencePools.
+	return krt.NewCollection(serviceImports, func(ctx krt.HandlerContext, obj controllers.Object) *InferencePool {
 		si := controllers.Extract[*unstructured.Unstructured](obj)
 		if si == nil {
 			return nil
@@ -220,11 +160,6 @@ func InferencePoolServiceCollection(
 			gatewayParents: gatewayParents,
 		}
 	}, opts.WithName("InferencePoolServiceImport")...)
-
-	return krt.JoinCollection([]krt.Collection[InferencePool]{
-		serviceInferencePools,
-		serviceImportInferencePools,
-	}, opts.WithName("InferencePoolServiceJoin")...)
 }
 
 func InferencePoolCollection(

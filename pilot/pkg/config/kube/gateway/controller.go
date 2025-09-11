@@ -126,13 +126,13 @@ type TypedResource struct {
 }
 
 type Outputs struct {
-	Gateways                       krt.Collection[Gateway]
-	VirtualServices                krt.Collection[*config.Config]
-	ReferenceGrants                ReferenceGrants
-	DestinationRules               krt.Collection[*config.Config]
-	InferencePools                 krt.Collection[InferencePool]
-	InferencePoolsByGateway        krt.Index[types.NamespacedName, InferencePool]
-	InferencePoolServicesByGateway krt.Index[types.NamespacedName, InferencePool]
+	Gateways                             krt.Collection[Gateway]
+	VirtualServices                      krt.Collection[*config.Config]
+	ReferenceGrants                      ReferenceGrants
+	DestinationRules                     krt.Collection[*config.Config]
+	InferencePools                       krt.Collection[InferencePool]
+	InferencePoolsByGateway              krt.Index[types.NamespacedName, InferencePool]
+	InferencePoolServiceImportsByGateway krt.Index[types.NamespacedName, InferencePool]
 }
 
 type Inputs struct {
@@ -289,10 +289,9 @@ func NewController(
 		opts,
 	)
 
-	var InferencePoolServices krt.Collection[InferencePool]
+	var InferencePoolServiceImports krt.Collection[InferencePool]
 	if features.EnableGatewayAPIInferenceExtension {
-		InferencePoolServices = InferencePoolServiceCollection(
-			inputs.Services,
+		InferencePoolServiceImports = InferencePoolServiceImportCollection(
 			inputs.ServiceImports,
 			inputs.HTTPRoutes,
 			inputs.Gateways,
@@ -334,7 +333,7 @@ func NewController(
 		InferencePools:  inputs.InferencePools,
 		internalContext: c.gatewayContext,
 	}
-	
+
 	tcpRoutes := TCPRouteCollection(
 		inputs.TCPRoutes,
 		routeInputs,
@@ -384,18 +383,18 @@ func NewController(
 		return i.gatewayParents.UnsortedList()
 	})
 
-	InferencePoolServicesByGateway := krt.NewIndex(InferencePoolServices, "ServicesByGateway", func(i InferencePool) []types.NamespacedName {
+	InferencePoolServiceImportsByGateway := krt.NewIndex(InferencePoolServiceImports, "ServicesByGateway", func(i InferencePool) []types.NamespacedName {
 		return i.gatewayParents.UnsortedList()
 	})
 
 	outputs := Outputs{
-		ReferenceGrants:                ReferenceGrants,
-		Gateways:                       Gateways,
-		VirtualServices:                VirtualServices,
-		DestinationRules:               DestinationRules,
-		InferencePools:                 InferencePools,
-		InferencePoolsByGateway:        InferencePoolsByGateway,
-		InferencePoolServicesByGateway: InferencePoolServicesByGateway,
+		ReferenceGrants:                      ReferenceGrants,
+		Gateways:                             Gateways,
+		VirtualServices:                      VirtualServices,
+		DestinationRules:                     DestinationRules,
+		InferencePools:                       InferencePools,
+		InferencePoolsByGateway:              InferencePoolsByGateway,
+		InferencePoolServiceImportsByGateway: InferencePoolServiceImportsByGateway,
 	}
 	c.outputs = outputs
 
@@ -652,8 +651,8 @@ func (c *Controller) HasInferencePool(gw types.NamespacedName) bool {
 	return len(c.outputs.InferencePoolsByGateway.Lookup(gw)) > 0
 }
 
-func (c *Controller) HasInferencePoolService(svc types.NamespacedName) bool {
-	return len(c.outputs.InferencePoolServicesByGateway.Lookup(svc)) > 0
+func (c *Controller) HasInferencePoolServiceImport(svc types.NamespacedName) bool {
+	return len(c.outputs.InferencePoolServiceImportsByGateway.Lookup(svc)) > 0
 }
 
 func (c *Controller) inRevision(obj any) bool {

@@ -414,7 +414,7 @@ func (lb *ListenerBuilder) buildHTTPConnectionManager(httpOpts *httpListenerOpts
 		// Add ExtProc per listener only if the Gateway has any inferencePool (or pseudo-service) attached to it
 		if kubeGwName, ok := lb.node.Labels[label.IoK8sNetworkingGatewayGatewayName.Name]; ok {
 			gwName := types.NamespacedName{Name: kubeGwName, Namespace: lb.node.GetNamespace()}
-			if lb.push.GatewayAPIController.HasInferencePool(gwName) || lb.push.GatewayAPIController.HasInferencePoolService(gwName) {
+			if lb.push.GatewayAPIController.HasInferencePool(gwName) || lb.push.GatewayAPIController.HasInferencePoolServiceImport(gwName) {
 				filters = append(filters, xdsfilters.InferencePoolExtProc)
 			}
 		}

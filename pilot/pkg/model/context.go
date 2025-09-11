@@ -1068,7 +1068,7 @@ type InferenceGatewayContext interface {
 	HasInferencePool(types.NamespacedName) bool
 	// HasInferencePoolService returns whether or not a given gateway has a reference to a Service
 	// (or ServiceImport) that is acting as an InferencePool
-	HasInferencePoolService(types.NamespacedName) bool
+	HasInferencePoolServiceImport(types.NamespacedName) bool
 }
 
 type GatewayController interface {
