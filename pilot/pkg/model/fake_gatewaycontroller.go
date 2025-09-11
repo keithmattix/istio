@@ -24,11 +24,16 @@ import (
 
 type FakeController struct {
 	ConfigStoreController
-	GatewaysWithInferencePools sets.Set[types.NamespacedName]
+	GatewaysWithInferencePools        sets.Set[types.NamespacedName]
+	GatewaysWithInferencePoolServices sets.Set[types.NamespacedName]
 }
 
 func (f FakeController) HasInferencePool(gw types.NamespacedName) bool {
 	return f.GatewaysWithInferencePools.Contains(gw)
+}
+
+func (f FakeController) HasInferencePoolService(gw types.NamespacedName) bool {
+	return f.GatewaysWithInferencePoolServices.Contains(gw)
 }
 
 func (f FakeController) Reconcile(_ *PushContext) {}

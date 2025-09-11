@@ -30,6 +30,7 @@ import (
 	wrappers "google.golang.org/protobuf/types/known/wrapperspb"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	klabels "k8s.io/apimachinery/pkg/labels"
 	inferencev1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
 	k8s "sigs.k8s.io/gateway-api/apis/v1"
@@ -1058,17 +1059,61 @@ func buildDestination(ctx RouteContext, to k8s.BackendRef, ns string,
 			invalidBackendErr = &ConfigError{Reason: InvalidDestinationNotFound, Message: fmt.Sprintf("backend(%s) not found", hostname)}
 		}
 	case config.GroupVersionKind{Group: features.MCSAPIGroup, Kind: "ServiceImport"}:
+		key := namespace + "/" + string(to.Name)
 		hostname = string(to.Name) + "." + namespace + ".svc.clusterset.local"
+		var svc controllers.Object
 		if !features.EnableMCSHost {
 			// They asked for ServiceImport, but actually don't have full support enabled...
 			// No problem, we can just treat it as Service, which is already cross-cluster in this mode anyways
 			hostname = string(to.Name) + "." + namespace + ".svc." + ctx.DomainSuffix
+			svc = ptr.Flatten(krt.FetchOne(ctx.Krt, ctx.Services, krt.FilterKey(key)))
+		} else {
+			svc = ptr.OrEmpty(krt.FetchOne(ctx.Krt, ctx.ServiceImports, krt.FilterKey(key)))
 		}
-		// TODO: currently we are always looking for Service. We should be looking for ServiceImport when features.EnableMCSHost
-		key := namespace + "/" + string(to.Name)
-		svc := ptr.Flatten(krt.FetchOne(ctx.Krt, ctx.Services, krt.FilterKey(key)))
+
 		if svc == nil {
 			invalidBackendErr = &ConfigError{Reason: InvalidDestinationNotFound, Message: fmt.Sprintf("backend(%s) not found", hostname)}
+		}
+
+		// Only move forward if the inference extension is enabled and the service is labeled as an inference pool
+		if !features.EnableGatewayAPIInferenceExtension || svc.GetLabels()[constants.InternalServiceSemantics] != constants.ServiceSemanticsInferencePool {
+			break
+		}
+
+		switch svc.(type) {
+		case *corev1.Service:
+			// Not using MCSHost; normal service
+			// TODO:
+		default:
+			// Full-fletched ServiceImport with MCS semantics
+			si := controllers.Extract[*unstructured.Unstructured](svc)
+			if si.GetLabels() == nil {
+				invalidBackendErr = &ConfigError{Reason: InvalidDestination, Message: "ServiceImport (as InferencePool) invalid, extensionRef labels not found"}
+				return &istio.Destination{}, nil, invalidBackendErr
+			}
+
+			ipCfg := &inferencePoolConfig{
+				enableExtProc: true,
+			}
+
+			// TODO: if this is labeled as a ServiceImport and EnableMCSHost is on, then the
+			// hostname should be clusterset.local
+			if dst, ok := si.GetLabels()[InferencePoolExtensionRefSvc]; ok {
+				ipCfg.endpointPickerDst = dst + "." + si.GetNamespace() + ".svc." + ctx.DomainSuffix
+			}
+
+			if p, ok := si.GetLabels()[InferencePoolExtensionRefPort]; ok {
+				ipCfg.endpointPickerPort = p
+			}
+			if fm, ok := si.GetLabels()[InferencePoolExtensionRefFailureMode]; ok {
+				ipCfg.endpointPickerFailureMode = fm
+			}
+			if ipCfg.endpointPickerDst == "" || ipCfg.endpointPickerPort == "" || ipCfg.endpointPickerFailureMode == "" {
+				invalidBackendErr = &ConfigError{Reason: InvalidDestination, Message: "InferencePool service invalid, extensionRef labels not found"}
+			}
+			return &istio.Destination{
+				Host: hostname,
+			}, ipCfg, invalidBackendErr
 		}
 	case gvk.InferencePool:
 		if !features.EnableGatewayAPIInferenceExtension {

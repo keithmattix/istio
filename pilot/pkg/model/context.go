@@ -1066,6 +1066,9 @@ func (node *Proxy) DeleteWatchedResource(typeURL string) {
 type InferenceGatewayContext interface {
 	// HasInferencePool returns whether or not a given gateway has a reference to an InferencePool
 	HasInferencePool(types.NamespacedName) bool
+	// HasInferencePoolService returns whether or not a given gateway has a reference to a Service
+	// (or ServiceImport) that is acting as an InferencePool
+	HasInferencePoolService(types.NamespacedName) bool
 }
 
 type GatewayController interface {

@@ -21,6 +21,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	inferencev1 "sigs.k8s.io/gateway-api-inference-extension/api/v1"
@@ -29,8 +30,10 @@ import (
 
 	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/config/schema/gvk"
+	"istio.io/istio/pkg/kube/controllers"
 	"istio.io/istio/pkg/kube/kclient"
 	"istio.io/istio/pkg/kube/krt"
+	"istio.io/istio/pkg/kube/mcs"
 	"istio.io/istio/pkg/maps"
 	"istio.io/istio/pkg/ptr"
 	"istio.io/istio/pkg/slices"
@@ -89,7 +92,139 @@ type InferencePool struct {
 }
 
 func (i InferencePool) ResourceName() string {
-	return i.shadowService.key.Namespace + "/" + i.shadowService.poolName
+	if i.shadowService.poolName != "" {
+		return i.shadowService.key.Namespace + "/" + i.shadowService.poolName
+	}
+
+	// If this is a pseudo-inference pool (based on a Service or ServiceImport), use the service name
+	return i.shadowService.key.String()
+}
+
+func InferencePoolServiceCollection(
+	services krt.Collection[*corev1.Service],
+	serviceImports krt.Collection[controllers.Object],
+	httpRoutes krt.Collection[*gateway.HTTPRoute],
+	gateways krt.Collection[*gateway.Gateway],
+	routesByServiceOrServiceImport krt.Index[string, *gateway.HTTPRoute],
+	c *Controller,
+	opts krt.OptionsBuilder,
+) krt.Collection[InferencePool] {
+	// These are manually updated Service resources that we want to treat as InferencePools.
+	serviceInferencePools := krt.NewCollection(services, func(ctx krt.HandlerContext, svc *corev1.Service) *InferencePool {
+		// Only process services labeled as inference pools
+		if svc.Labels[constants.InternalServiceSemantics] != constants.ServiceSemanticsInferencePool {
+			return nil
+		}
+		// Skip services that have the InferencePoolRefLabel, as those are shadow services
+		// and we don't want to count those twice
+		if _, hasInferencePoolLabel := svc.Labels[InferencePoolRefLabel]; hasInferencePoolLabel {
+			return nil
+		}
+
+		port, err := strconv.ParseInt(svc.Labels[InferencePoolExtensionRefPort], 10, 32)
+		if err != nil {
+			log.Errorf("skipping pseudo-inference pool service %s/%s, invalid port: %v", svc.Namespace, svc.Name, err)
+			return nil
+		}
+
+		// TODO: None of this may be necessary; I think all this collection is used for is to check
+		// the presence of the InferencePool on the gateway since we aren't creating shadow services here.
+		extRef := extRefInfo{
+			name: svc.Labels[InferencePoolExtensionRefSvc],
+			port: int32(port),
+		}
+
+		extRef.failureMode = string(inferencev1.EndpointPickerFailClose) // Default failure mode
+		if failureMode, ok := svc.Labels[InferencePoolExtensionRefFailureMode]; ok {
+			extRef.failureMode = failureMode
+		}
+
+		if extRef.name == "" || extRef.port == 0 {
+			log.Errorf("skipping pseudo-inference pool service %s/%s, missing required labels", svc.Namespace, svc.Name)
+		}
+
+		targetPorts := make([]targetPort, 0, len(svc.Spec.Ports))
+		for _, port := range svc.Spec.Ports {
+			targetPorts = append(targetPorts, targetPort{port: port.TargetPort.IntVal})
+		}
+
+		routeList := krt.Fetch(ctx, httpRoutes, krt.FilterIndex(routesByServiceOrServiceImport, svc.Namespace+"/"+svc.Name))
+
+		// Find gateway parents that reference this InferencePool through HTTPRoutes
+		gatewayParents := findGatewayParents(svc, routeList, isServiceBackendRef)
+		return &InferencePool{
+			// In this case, this is an actual service
+			// Don't need poolName or poolUID fields
+			// since there's no owner reference
+			shadowService: shadowServiceInfo{
+				key: types.NamespacedName{
+					Name:      svc.Name,
+					Namespace: svc.Namespace,
+				},
+				// N.B We're not creating a shadow service, so selector is not needed
+				// Similar logic applies to targetPort.
+			},
+			extRef:         extRef,
+			gatewayParents: gatewayParents,
+		}
+	}, opts.WithName("InferencePoolService")...)
+
+	serviceImportInferencePools := krt.NewCollection(serviceImports, func(ctx krt.HandlerContext, obj controllers.Object) *InferencePool {
+		si := controllers.Extract[*unstructured.Unstructured](obj)
+		if si == nil {
+			return nil
+		}
+
+		// Only process services labeled as inference pools
+		if si.GetLabels()[constants.InternalServiceSemantics] != constants.ServiceSemanticsInferencePool {
+			return nil
+		}
+
+		port, err := strconv.ParseInt(si.GetLabels()[InferencePoolExtensionRefPort], 10, 32)
+		if err != nil {
+			log.Errorf("skipping pseudo-inference pool service %s/%s, invalid port: %v", si.GetNamespace(), si.GetName(), err)
+			return nil
+		}
+		extRef := extRefInfo{
+			name: si.GetLabels()[InferencePoolExtensionRefSvc],
+			port: int32(port),
+		}
+
+		extRef.failureMode = string(inferencev1.EndpointPickerFailClose) // Default failure mode
+		if failureMode, ok := si.GetLabels()[InferencePoolExtensionRefFailureMode]; ok {
+			extRef.failureMode = failureMode
+		}
+
+		if extRef.name == "" || extRef.port == 0 {
+			log.Errorf("skipping pseudo-inference pool service %s/%s, missing required labels", si.GetNamespace(), si.GetName())
+		}
+
+		routeList := krt.Fetch(ctx, httpRoutes, krt.FilterIndex(routesByServiceOrServiceImport, si.GetNamespace()+"/"+si.GetName()))
+
+		// Find gateway parents that reference this InferencePool through HTTPRoutes
+		gatewayParents := findGatewayParents(si, routeList, isServiceBackendRef)
+		return &InferencePool{
+			// In this case, this is an actual service
+			// Don't need poolName or poolUID fields
+			// since there's no owner reference
+			shadowService: shadowServiceInfo{
+				key: types.NamespacedName{
+					Name:      si.GetName(),
+					Namespace: si.GetNamespace(),
+				},
+				// This is a service import, no selector necessary
+				// Also don't need target port; the envoy cluster will
+				// be populated by data in EndpointSlice
+			},
+			extRef:         extRef,
+			gatewayParents: gatewayParents,
+		}
+	}, opts.WithName("InferencePoolServiceImport")...)
+
+	return krt.JoinCollection([]krt.Collection[InferencePool]{
+		serviceInferencePools,
+		serviceImportInferencePools,
+	}, opts.WithName("InferencePoolServiceJoin")...)
 }
 
 func InferencePoolCollection(
@@ -110,7 +245,7 @@ func InferencePoolCollection(
 			routeList := krt.Fetch(ctx, httpRoutes, krt.FilterIndex(routesByInferencePool, pool.Namespace+"/"+pool.Name))
 
 			// Find gateway parents that reference this InferencePool through HTTPRoutes
-			gatewayParents := findGatewayParents(pool, routeList)
+			gatewayParents := findGatewayParents(pool, routeList, isInferencePoolBackendRef)
 
 			// TODO: If no gateway parents, we should not do anything
 			// 		note: we still need to filter out our Status to clean up previous reconciliations
@@ -226,14 +361,15 @@ func calculateInferencePoolStatus(
 
 // findGatewayParents finds all Gateway parents that reference this InferencePool through HTTPRoutes
 func findGatewayParents(
-	pool *inferencev1.InferencePool,
+	pool controllers.Object,
 	routeList []*gateway.HTTPRoute,
+	matchesKind func(gatewayv1.BackendRef) bool,
 ) sets.Set[types.NamespacedName] {
 	gatewayParents := sets.New[types.NamespacedName]()
 
 	for _, route := range routeList {
 		// Only process routes that reference our InferencePool
-		if !routeReferencesInferencePool(route, pool) {
+		if !routeReferencesInferencePool(route, pool, matchesKind) {
 			continue
 		}
 
@@ -262,15 +398,15 @@ func findGatewayParents(
 }
 
 // routeReferencesInferencePool checks if an HTTPRoute references the given InferencePool
-func routeReferencesInferencePool(route *gateway.HTTPRoute, pool *inferencev1.InferencePool) bool {
+func routeReferencesInferencePool(route *gateway.HTTPRoute, pool controllers.Object, matchesKind func(gatewayv1.BackendRef) bool) bool {
 	for _, rule := range route.Spec.Rules {
 		for _, backendRef := range rule.BackendRefs {
-			if !isInferencePoolBackendRef(backendRef.BackendRef) {
+			if !matchesKind(backendRef.BackendRef) {
 				continue
 			}
 
 			// Check if this backend ref points to our InferencePool
-			if string(backendRef.BackendRef.Name) != pool.ObjectMeta.Name {
+			if string(backendRef.BackendRef.Name) != pool.GetName() {
 				continue
 			}
 
@@ -280,12 +416,22 @@ func routeReferencesInferencePool(route *gateway.HTTPRoute, pool *inferencev1.In
 				backendRefNamespace = string(*backendRef.BackendRef.Namespace)
 			}
 
-			if backendRefNamespace == pool.Namespace {
+			if backendRefNamespace == pool.GetNamespace() {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func isServiceImportBackendRef(backendRef gatewayv1.BackendRef) bool {
+	return ptr.OrEmpty(backendRef.Group) == gatewayv1.Group(mcs.MCSSchemeGroupVersion.Group) &&
+		ptr.OrEmpty(backendRef.Kind) == "ServiceImport"
+}
+
+func isServiceBackendRef(backendRef gatewayv1.BackendRef) bool {
+	return ptr.OrEmpty(backendRef.Group) == "" &&
+		ptr.OrEmpty(backendRef.Kind) == gatewayv1.Kind(gvk.Service.Kind)
 }
 
 // isInferencePoolBackendRef checks if a BackendRef is pointing to an InferencePool
@@ -347,7 +493,7 @@ func calculateAcceptedStatus(
 	// Check if any HTTPRoute references this InferencePool and has this gateway as an accepted parent
 	for _, route := range routeList {
 		// Only process routes that reference our InferencePool
-		if !routeReferencesInferencePool(route, pool) {
+		if !routeReferencesInferencePool(route, pool, isInferencePoolBackendRef) {
 			continue
 		}
 
@@ -619,6 +765,30 @@ func indexHTTPRouteByInferencePool(o *gateway.HTTPRoute) []string {
 				key := backendRefNamespace + "/" + string(backendRef.Name)
 				keys = append(keys, key)
 			}
+		}
+	}
+	return keys
+}
+
+func indexHTTPRouteByServiceOrServiceImport(o *gateway.HTTPRoute) []string {
+	var keys []string
+	for _, rule := range o.Spec.Rules {
+		for _, backendRef := range rule.BackendRefs {
+			// We only care about Service or ServiceImport kinds
+			kind := ptr.OrEmpty(backendRef.BackendRef.Kind)
+			group := ptr.OrEmpty(backendRef.BackendRef.Group)
+			// If the backendRef isn't a service or serviceImport, we don't care about it
+			if kind != gatewayv1.Kind(gvk.Service.Kind) && (kind != "ServiceImport" && group != gatewayv1.Group(mcs.ServiceImportGVR.Group)) {
+				continue
+			}
+
+			// If BackendRef.Namespace is not specified, the backend is in the same namespace as the HTTPRoute's
+			backendRefNamespace := o.Namespace
+			if ptr.OrEmpty(backendRef.BackendRef.Namespace) != "" {
+				backendRefNamespace = string(*backendRef.BackendRef.Namespace)
+			}
+			key := backendRefNamespace + "/" + string(backendRef.Name)
+			keys = append(keys, key)
 		}
 	}
 	return keys

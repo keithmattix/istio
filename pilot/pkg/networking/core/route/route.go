@@ -512,6 +512,7 @@ func TranslateRoute(
 	var hostnames []host.Name
 	if infPoolRouteRuleCfg, ok := opts.InferencePoolExtensionRefs[in.Name]; ok {
 		// This route has an inference pool config, set up ext_proc
+		// TODO: What does the host key look like with MCS on?
 		extSvcHost := host.Name(infPoolRouteRuleCfg.FQDN)
 		extPortNum, _ := strconv.Atoi(infPoolRouteRuleCfg.Port)
 		if out.TypedPerFilterConfig == nil {

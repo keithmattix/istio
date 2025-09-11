@@ -47,6 +47,7 @@ import (
 	"istio.io/istio/pkg/kube/kclient"
 	"istio.io/istio/pkg/kube/krt"
 	"istio.io/istio/pkg/kube/kubetypes"
+	"istio.io/istio/pkg/kube/mcs"
 	istiolog "istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/ptr"
 	"istio.io/istio/pkg/revisions"
@@ -125,12 +126,13 @@ type TypedResource struct {
 }
 
 type Outputs struct {
-	Gateways                krt.Collection[Gateway]
-	VirtualServices         krt.Collection[*config.Config]
-	ReferenceGrants         ReferenceGrants
-	DestinationRules        krt.Collection[*config.Config]
-	InferencePools          krt.Collection[InferencePool]
-	InferencePoolsByGateway krt.Index[types.NamespacedName, InferencePool]
+	Gateways                       krt.Collection[Gateway]
+	VirtualServices                krt.Collection[*config.Config]
+	ReferenceGrants                ReferenceGrants
+	DestinationRules               krt.Collection[*config.Config]
+	InferencePools                 krt.Collection[InferencePool]
+	InferencePoolsByGateway        krt.Index[types.NamespacedName, InferencePool]
+	InferencePoolServicesByGateway krt.Index[types.NamespacedName, InferencePool]
 }
 
 type Inputs struct {
@@ -151,6 +153,7 @@ type Inputs struct {
 	BackendTrafficPolicy krt.Collection[*gatewayx.XBackendTrafficPolicy]
 	BackendTLSPolicies   krt.Collection[*gatewayalpha3.BackendTLSPolicy]
 	ServiceEntries       krt.Collection[*networkingclient.ServiceEntry]
+	ServiceImports       krt.Collection[controllers.Object]
 	InferencePools       krt.Collection[*inferencev1.InferencePool]
 }
 
@@ -205,6 +208,8 @@ func NewController(
 
 		ReferenceGrants: buildClient[*gateway.ReferenceGrant](c, kc, gvr.ReferenceGrant, opts, "informer/ReferenceGrants"),
 		ServiceEntries:  buildClient[*networkingclient.ServiceEntry](c, kc, gvr.ServiceEntry, opts, "informer/ServiceEntries"),
+		// N.B this is a dynamic GVK based on MCSAPIGroup and MCSAPIVersion env vars
+		ServiceImports: buildClientBase[controllers.Object](c, kc, mcs.ServiceImportGVR, opts, kubetypes.DynamicInformer, "informer/ServiceImports"),
 	}
 	if features.EnableAlphaGatewayAPI {
 		inputs.TCPRoutes = buildClient[*gatewayalpha.TCPRoute](c, kc, gvr.TCPRoute, opts, "informer/TCPRoutes")
@@ -237,6 +242,7 @@ func NewController(
 	handlers := []krt.HandlerRegistration{}
 
 	httpRoutesByInferencePool := krt.NewIndex(inputs.HTTPRoutes, "inferencepool-route", indexHTTPRouteByInferencePool)
+	httpRoutesByServiceOrServiceImport := krt.NewIndex(inputs.HTTPRoutes, "service-route", indexHTTPRouteByServiceOrServiceImport)
 
 	GatewayClassStatus, GatewayClasses := GatewayClassesCollection(inputs.GatewayClasses, opts)
 	status.RegisterStatus(c.status, GatewayClassStatus, GetStatus)
@@ -283,6 +289,18 @@ func NewController(
 		opts,
 	)
 
+	var InferencePoolServices krt.Collection[InferencePool]
+	if features.EnableGatewayAPIInferenceExtension {
+		InferencePoolServices = InferencePoolServiceCollection(
+			inputs.Services,
+			inputs.ServiceImports,
+			inputs.HTTPRoutes,
+			inputs.Gateways,
+			httpRoutesByServiceOrServiceImport,
+			c,
+			opts,
+		)
+	}
 	InferencePoolStatus, InferencePools := InferencePoolCollection(
 		inputs.InferencePools,
 		inputs.Services,
@@ -312,9 +330,11 @@ func NewController(
 		Services:        inputs.Services,
 		Namespaces:      inputs.Namespaces,
 		ServiceEntries:  inputs.ServiceEntries,
+		ServiceImports:  inputs.ServiceImports,
 		InferencePools:  inputs.InferencePools,
 		internalContext: c.gatewayContext,
 	}
+	
 	tcpRoutes := TCPRouteCollection(
 		inputs.TCPRoutes,
 		routeInputs,
@@ -364,13 +384,18 @@ func NewController(
 		return i.gatewayParents.UnsortedList()
 	})
 
+	InferencePoolServicesByGateway := krt.NewIndex(InferencePoolServices, "ServicesByGateway", func(i InferencePool) []types.NamespacedName {
+		return i.gatewayParents.UnsortedList()
+	})
+
 	outputs := Outputs{
-		ReferenceGrants:         ReferenceGrants,
-		Gateways:                Gateways,
-		VirtualServices:         VirtualServices,
-		DestinationRules:        DestinationRules,
-		InferencePools:          InferencePools,
-		InferencePoolsByGateway: InferencePoolsByGateway,
+		ReferenceGrants:                ReferenceGrants,
+		Gateways:                       Gateways,
+		VirtualServices:                VirtualServices,
+		DestinationRules:               DestinationRules,
+		InferencePools:                 InferencePools,
+		InferencePoolsByGateway:        InferencePoolsByGateway,
+		InferencePoolServicesByGateway: InferencePoolServicesByGateway,
 	}
 	c.outputs = outputs
 
@@ -453,6 +478,17 @@ func buildClient[I controllers.ComparableObject](
 	opts krt.OptionsBuilder,
 	name string,
 ) krt.Collection[I] {
+	return buildClientBase[I](c, kc, res, opts, kubetypes.StandardInformer, name)
+}
+
+func buildClientBase[I controllers.ComparableObject](
+	c *Controller,
+	kc kube.Client,
+	res schema.GroupVersionResource,
+	opts krt.OptionsBuilder,
+	infType kubetypes.InformerType,
+	name string,
+) krt.Collection[I] {
 	filter := kclient.Filter{
 		ObjectFilter: kubetypes.ComposeFilters(kc.ObjectFilter(), c.inRevision),
 	}
@@ -462,7 +498,7 @@ func buildClient[I controllers.ComparableObject](
 		filter.ObjectFilter = kc.ObjectFilter()
 	}
 
-	cc := kclient.NewDelayedInformer[I](kc, res, kubetypes.StandardInformer, filter)
+	cc := kclient.NewDelayedInformer[I](kc, res, infType, filter)
 	return krt.WrapClient[I](cc, opts.WithName(name)...)
 }
 
@@ -614,6 +650,10 @@ func pushXds[T any](xds model.XDSUpdater, f func(T) model.ConfigKey) func(events
 
 func (c *Controller) HasInferencePool(gw types.NamespacedName) bool {
 	return len(c.outputs.InferencePoolsByGateway.Lookup(gw)) > 0
+}
+
+func (c *Controller) HasInferencePoolService(svc types.NamespacedName) bool {
+	return len(c.outputs.InferencePoolServicesByGateway.Lookup(svc)) > 0
 }
 
 func (c *Controller) inRevision(obj any) bool {
