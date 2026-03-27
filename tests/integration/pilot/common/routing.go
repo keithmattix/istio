@@ -3016,6 +3016,8 @@ spec:
 				"GrpcPort":       ports.GRPC.ServicePort,
 				"GrpcTargetPort": ports.GRPC.WorkloadPort,
 			})
+			// Apply the service once for all the tests so we don't constantly churn the ClusterIP
+			t.ConfigIstio().YAML(t.Apps.Namespace.Name(), svc).ApplyOrFail(t)
 
 			destRule := fmt.Sprintf(`
 ---
@@ -3064,9 +3066,8 @@ spec:
 			// Add a negative test case. This ensures that the test is actually valid; its not a super trivial check
 			// and could be broken by having only 1 pod so its good to have this check in place
 			t.RunTraffic(TrafficTestCase{
-				name:   "no consistent",
-				config: svc,
-				call:   c.CallOrFail,
+				name: "no consistent",
+				call: c.CallOrFail,
 				opts: echo.CallOptions{
 					Count:   10,
 					Address: svcName,
@@ -3153,25 +3154,25 @@ spec:
 			// But its pretty hard to test that, so for now just ensure we hit the same one.
 			t.RunTraffic(TrafficTestCase{
 				name:   "source ip " + c.Config().Service,
-				config: svc + tmpl.MustEvaluate(destRule, "useSourceIp: true"),
+				config: tmpl.MustEvaluate(destRule, "useSourceIp: true"),
 				call:   c.CallOrFail,
 				opts:   callOpts,
 			})
 			t.RunTraffic(TrafficTestCase{
 				name:   "query param" + c.Config().Service,
-				config: svc + tmpl.MustEvaluate(destRule, "httpQueryParameterName: some-query-param"),
+				config: tmpl.MustEvaluate(destRule, "httpQueryParameterName: some-query-param"),
 				call:   c.CallOrFail,
 				opts:   callOpts,
 			})
 			t.RunTraffic(TrafficTestCase{
 				name:   "http header" + c.Config().Service,
-				config: svc + tmpl.MustEvaluate(destRule, "httpHeaderName: x-some-header"),
+				config: tmpl.MustEvaluate(destRule, "httpHeaderName: x-some-header"),
 				call:   c.CallOrFail,
 				opts:   callOpts,
 			})
 			t.RunTraffic(TrafficTestCase{
 				name:   "tcp source ip " + c.Config().Service,
-				config: svc + tmpl.MustEvaluate(destRule, "useSourceIp: true"),
+				config: tmpl.MustEvaluate(destRule, "useSourceIp: true"),
 				call:   c.CallOrFail,
 				opts:   tcpCallopts,
 				skip: skip{
@@ -3181,7 +3182,7 @@ spec:
 			})
 			t.RunTraffic(TrafficTestCase{
 				name:   "http cookie with ttl" + c.Config().Service,
-				config: svc + tmpl.MustEvaluate(cookieWithTTLDest, ""),
+				config: tmpl.MustEvaluate(cookieWithTTLDest, ""),
 				call:   c.CallOrFail,
 				opts:   cookieCallOpts,
 				skip: skip{
@@ -3191,7 +3192,7 @@ spec:
 			})
 			t.RunTraffic(TrafficTestCase{
 				name:   "http cookie without ttl" + c.Config().Service,
-				config: svc + tmpl.MustEvaluate(cookieWithoutTTLDest, ""),
+				config: tmpl.MustEvaluate(cookieWithoutTTLDest, ""),
 				call:   c.CallOrFail,
 				opts:   cookieWithoutTTLCallOpts,
 				skip: skip{
