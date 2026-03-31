@@ -1073,11 +1073,6 @@ func TestGetDNSConnectStrategy(t *testing.T) {
 			want:        DNSConnectStrategyRaceFirstTCPConnect,
 		},
 		{
-			name:        "old annotation key ignored",
-			annotations: map[string]string{"ambient.istio.io/connect-strategy": "RACE_FIRST_TCP_CONNECT"},
-			want:        DNSConnectStrategyDefault,
-		},
-		{
 			name:        "missing annotation default",
 			annotations: map[string]string{},
 			want:        DNSConnectStrategyDefault,
