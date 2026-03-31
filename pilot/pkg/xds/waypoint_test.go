@@ -626,7 +626,7 @@ metadata:
     istio.io/use-waypoint: waypoint
     istio.io/use-waypoint-namespace: default
   annotations:
-    ambient.istio.io/connect-strategy: RACE_FIRST_TCP_CONNECT
+    istio.io/connect-strategy: RACE_FIRST_TCP_CONNECT
 spec:
   hosts: ["sql.example.com"]
   ports:

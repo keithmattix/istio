@@ -792,7 +792,7 @@ type K8sAttributes struct {
 	ObjectName string
 
 	// DNSConnectStrategy specifies the connection strategy for the service.
-	// When set to DNSConnectStrategyRaceFirstTCPConnect, waypoint proxies will set DnsLookupFamily=ALL
+	// When set to DNSConnectStrategyRaceFirstTCPConnect, DNS clusters will set DnsLookupFamily=ALL
 	// to enable Envoy's happy eyeballs algorithm.
 	DNSConnectStrategy DNSConnectStrategy
 
@@ -822,7 +822,7 @@ const (
 
 // GetDNSConnectStrategy reads the connect strategy from annotations.
 func GetDNSConnectStrategy(annotations map[string]string) DNSConnectStrategy {
-	if strings.EqualFold(annotations["ambient.istio.io/connect-strategy"], "RACE_FIRST_TCP_CONNECT") {
+	if strings.EqualFold(annotations["istio.io/connect-strategy"], "RACE_FIRST_TCP_CONNECT") {
 		return DNSConnectStrategyRaceFirstTCPConnect
 	}
 	return DNSConnectStrategyDefault
@@ -1195,12 +1195,10 @@ const (
 	// WaypointMissing is set on a ServiceEntry with a wildcard hostname and not bound to a waypoint.
 	// It is used to inform the user that the ServiceEntry will not be active until it is bound to a waypoint.
 	WaypointMissing ConditionType = "istio.io/WaypointMissing"
-	// ConnectStrategyWithoutWaypoint is set when a ServiceEntry has a non-default connect strategy
-	// but is not bound to a waypoint. A waypoint is required for connect strategies to take effect.
+	// ConnectStrategyWithoutWaypoint is deprecated and retained for backwards compatibility with older status conditions.
 	ConnectStrategyWithoutWaypoint ConditionType = "istio.io/ConnectStrategyWithoutWaypoint"
 
-	NoWaypointForWildcardService          string = "NoWaypointForWildcardService"
-	NoWaypointForConnectStrategyCondition string = "ConnectStrategyRequiresWaypoint"
+	NoWaypointForWildcardService string = "NoWaypointForWildcardService"
 )
 
 type ConditionSet = map[ConditionType]*Condition
@@ -1230,11 +1228,8 @@ func (i ServiceInfo) GetConditions(currentConditions map[string]Condition) Condi
 		// Only prune WaypointMissing condition if we have a wildcard service entry
 		set[WaypointMissing] = nil
 	}
-	if _, f := currentConditions[string(ConnectStrategyWithoutWaypoint)]; f ||
-		(i.DNSConnectStrategy != DNSConnectStrategyDefault && i.Source.Kind == kind.ServiceEntry) {
-		// Only prune ConnectStrategyWithoutWaypoint condition if we have a non-default connect strategy OR if the condition is already set.
-		// This ensures we do not have a scenario where a user sets a connect strategy, then removes it and
-		// the condition never goes away because we only check for non default strategies and not the presence of the condition itself.
+	if _, f := currentConditions[string(ConnectStrategyWithoutWaypoint)]; f {
+		// Always prune ConnectStrategyWithoutWaypoint since connect strategy is no longer waypoint-specific.
 		set[ConnectStrategyWithoutWaypoint] = nil
 	}
 
@@ -1269,13 +1264,6 @@ func (i ServiceInfo) GetConditions(currentConditions map[string]Condition) Condi
 				Status:  true,
 				Reason:  NoWaypointForWildcardService,
 				Message: buildMsg.String(),
-			}
-		}
-		if i.DNSConnectStrategy != DNSConnectStrategyDefault && i.Source.Kind == kind.ServiceEntry {
-			set[ConnectStrategyWithoutWaypoint] = &Condition{
-				Status:  false,
-				Reason:  NoWaypointForConnectStrategyCondition,
-				Message: "ServiceEntry has a non-default connect strategy but no waypoint bound. A waypoint is required for connect strategies to take effect.",
 			}
 		}
 	}
