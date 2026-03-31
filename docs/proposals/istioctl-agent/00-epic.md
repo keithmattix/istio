@@ -28,19 +28,22 @@ The agent should understand these boundaries and guide users to the right diagno
 ### Tool Architecture
 The agent exposes istioctl's existing capabilities as composable tools:
 
-| Tool Category | Wraps | Purpose |
-|---|---|---|
-| **Cluster State** | `proxy-status`, `version` | XDS sync, control plane health |
-| **Proxy Config** | `proxy-config cluster/listener/route/endpoint/secret/log` | Envoy sidecar inspection |
-| **Config Analysis** | `analyze` | 31+ analyzers, 40+ issue types |
-| **Resource Description** | `describe pod/svc` | Traffic flow tracing, policy analysis |
-| **Auth Policy** | `authz check` | RBAC policy extraction from Envoy |
-| **Ztunnel** | `ztunnel-config workload/services/policy/connections` | Ambient mode debugging |
-| **Waypoint** | `waypoint status/list` | Waypoint health and configuration |
-| **Pre-check** | `precheck` | Installation/upgrade readiness |
-| **Kubernetes** | kubectl wrappers | Pod logs, events, namespace labels, service details |
-| **Envoy Admin** | Direct admin API | Stats, logging levels, config dump |
-| **Istiod Debug** | `internal-debug` | syncz, configz, registryz, endpointShardz |
+| Tool Category | Wraps | Applies To | Purpose |
+|---|---|---|---|
+| **Cluster State** | `proxy-status`, `version` | All modes | XDS sync, control plane health |
+| **Envoy Proxy Inspection** | `proxy-config cluster/listener/route/endpoint/secret/log/bootstrap` | All Envoy proxies (sidecar, waypoint, gateway) | Envoy configuration, routing, endpoints, certs |
+| **Config Analysis** | `analyze` | All modes | 31+ analyzers, 40+ issue types |
+| **Resource Description** | `describe pod/svc` | All modes | Traffic flow tracing, policy analysis |
+| **Auth Policy** | `authz check` | All Envoy proxies | RBAC policy extraction from Envoy |
+| **Ztunnel** | `ztunnel-config workload/services/policy/connections` | Ambient only | Ztunnel-specific debugging |
+| **Waypoint** | `waypoint status/list` | Ambient only | Waypoint health and configuration |
+| **Sidecar CRD & Scoping** | Sidecar resource, exportTo | Sidecar only | Config scoping, service visibility, injection |
+| **Pre-check** | `precheck` | All modes | Installation/upgrade readiness |
+| **Kubernetes** | kubectl wrappers | All modes | Pod logs, events, namespace labels, service details |
+| **Envoy Advanced** | Direct admin API | All Envoy proxies | Stats, response flags, access log parsing |
+| **Istiod Debug** | `internal-debug` | All modes | syncz, configz, registryz, endpointShardz |
+
+> **Key insight**: Waypoint proxies are Envoy instances. All `proxy-config` tools (cluster, listener, route, endpoint, secret) work on waypoints. The only truly sidecar-specific features are the Sidecar CRD (configuration scoping/exportTo), outbound traffic interception, and sidecar injection.
 
 ### Guided Operations Framework
 Beyond troubleshooting, the agent supports guided operations that help users move from basic to advanced Istio usage:
@@ -57,14 +60,16 @@ The agent MUST understand and handle both data plane modes:
 
 **Sidecar Mode**:
 - Traffic intercepted by iptables → Envoy sidecar
-- Debug via `proxy-config`, `proxy-status`
+- Debug via `proxy-config` (works on any Envoy), `proxy-status`
 - Injection controlled by namespace label `istio-injection=enabled`
+- **Sidecar-only features**: Sidecar CRD (egress/ingress listeners, exportTo scoping), outbound traffic interception (VirtualOutbound listener), outbound traffic policy (ALLOW_ANY vs REGISTRY_ONLY)
 
 **Ambient Mode**:
 - Traffic intercepted by ztunnel (node-level) + optional waypoint (L7)
-- Debug via `ztunnel-config`, `waypoint status`
+- Debug ztunnel via `ztunnel-config`, waypoints via `proxy-config` (since waypoints are Envoy) and `waypoint status`
 - Enrollment via namespace label `istio.io/dataplane-mode=ambient`
 - Waypoints use Gateway API (`GatewayClassName: istio-waypoint-class`)
+- **Ambient-only features**: Ztunnel, HBONE tunneling, waypoint-based L7 processing
 
 ### Boundary Awareness
 The agent should detect and communicate when issues may lie outside Istio:
@@ -82,9 +87,9 @@ The agent should detect and communicate when issues may lie outside Istio:
 2. **[Sub-issue 02](./02-diagnostic-tools.md)**: Diagnostic Tool Wrappers
 3. **[Sub-issue 03](./03-guided-operations.md)**: Guided Operations Framework
 4. **[Sub-issue 04](./04-boundary-detection.md)**: Boundary Detection & Cross-Component Awareness
-5. **[Sub-issue 05](./05-ambient-mode-tools.md)**: Ambient Mode Specialized Tools
-6. **[Sub-issue 06](./06-sidecar-mode-tools.md)**: Sidecar Mode Specialized Tools
-7. **[Sub-issue 07](./07-envoy-deep-inspection.md)**: Envoy Deep Inspection Tools
+5. **[Sub-issue 05](./05-ambient-mode-tools.md)**: Ambient Mode Specialized Tools (ztunnel, waypoint management)
+6. **[Sub-issue 06](./06-sidecar-mode-tools.md)**: Sidecar-Only Features (Sidecar CRD, exportTo, injection)
+7. **[Sub-issue 07](./07-envoy-deep-inspection.md)**: Envoy Proxy Inspection & Deep Analysis (all proxy types)
 8. **[Sub-issue 08](./08-testing-docs.md)**: Testing, Documentation & UX
 
 ## Design Principles

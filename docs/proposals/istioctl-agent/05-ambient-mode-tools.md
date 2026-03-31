@@ -173,7 +173,7 @@ type WaypointListInput struct {
 
 ### Ambient Troubleshooting Workflows
 
-The agent should use these tools in specific patterns for common ambient issues:
+The agent should use these tools in specific patterns for common ambient issues. Note that **proxy-config tools work on waypoint pods** since waypoints are Envoy proxies with listeners, clusters, routes, etc. (see [Sub-issue 07](./07-envoy-deep-inspection.md)).
 
 #### Workflow: "Traffic not reaching my service in ambient mode"
 1. `ClusterModeTool` — Verify namespace is in ambient mode
@@ -181,22 +181,36 @@ The agent should use these tools in specific patterns for common ambient issues:
 3. `ZtunnelServicesTool` — Check service is registered with correct VIP
 4. `ZtunnelConnectionsTool` — Check if connections are being established
 5. `WaypointStatusTool` — If L7 features needed, check waypoint is ready
-6. `ZtunnelPolicyTool` — Check authorization policies aren't blocking
-7. `BoundaryCheck(CNI)` — Check CNI enrollment if ztunnel doesn't see the workload
+6. `ProxyConfigListenerTool` on waypoint pod — Check waypoint has inbound listeners for the service
+7. `ProxyConfigEndpointTool` on waypoint pod — Check waypoint sees healthy endpoints
+8. `ZtunnelPolicyTool` — Check authorization policies aren't blocking
+9. `BoundaryCheck(CNI)` — Check CNI enrollment if ztunnel doesn't see the workload
 
 #### Workflow: "Authorization policy not working in ambient"
 1. `ClusterModeTool` — Verify ambient mode
 2. `ZtunnelPolicyTool` — Check L4 policies in ztunnel
 3. `WaypointStatusTool` — L7 policies require a waypoint
-4. `AuthzCheckTool` on waypoint pod — Check L7 policies in waypoint Envoy
-5. Guide user: "L4 policies (principal, namespace) are enforced by ztunnel. L7 policies (paths, headers, methods) require a waypoint."
+4. `AuthzCheckTool` on waypoint pod — Check L7 policies in waypoint Envoy (uses same Envoy RBAC filter extraction)
+5. `ProxyConfigRouteTool` on waypoint pod — Verify routing configuration
+6. Guide user: "L4 policies (principal, namespace) are enforced by ztunnel. L7 policies (paths, headers, methods) require a waypoint."
 
 #### Workflow: "Waypoint not processing traffic"
 1. `WaypointStatusTool` — Is waypoint Programmed?
-2. `ZtunnelServicesTool` — Does ztunnel know about the waypoint?
-3. `ZtunnelWorkloadTool` — Are workloads/services using this waypoint?
-4. Check namespace labels — Is `istio.io/use-waypoint` set?
-5. Check Gateway API — Is GatewayClass `istio-waypoint-class` available?
+2. `ProxyConfigListenerTool` on waypoint pod — Check HBONE listener (15008) and internal listeners
+3. `ProxyConfigClusterTool` on waypoint pod — Check service clusters exist
+4. `ZtunnelServicesTool` — Does ztunnel know about the waypoint?
+5. `ZtunnelWorkloadTool` — Are workloads/services using this waypoint?
+6. Check namespace labels — Is `istio.io/use-waypoint` set?
+7. Check Gateway API — Is GatewayClass `istio-waypoint-class` available?
+
+#### Workflow: "Debugging waypoint Envoy configuration"
+1. `ProxyConfigBootstrapTool` on waypoint pod — Check version, metadata
+2. `ProxyConfigListenerTool` on waypoint pod — Waypoints only have inbound listeners (no VirtualOutbound)
+3. `ProxyConfigRouteTool` on waypoint pod — Check route matching for the service
+4. `ProxyConfigClusterTool` on waypoint pod — Check cluster configuration
+5. `ProxyConfigEndpointTool` on waypoint pod — Check backend endpoint health
+6. `ProxyConfigSecretTool` on waypoint pod — Check mTLS certificates
+7. `EnvoyStatsTool` on waypoint pod — Check connection pool and error stats
 
 ## Implementation Steps
 

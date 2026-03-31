@@ -33,9 +33,9 @@ declare -A ISSUES=(
   ["02-diagnostic-tools.md"]="[Agent] Diagnostic Tool Wrappers"
   ["03-guided-operations.md"]="[Agent] Guided Operations Framework"
   ["04-boundary-detection.md"]="[Agent] Boundary Detection & Cross-Component Awareness"
-  ["05-ambient-mode-tools.md"]="[Agent] Ambient Mode Specialized Tools"
-  ["06-sidecar-mode-tools.md"]="[Agent] Sidecar Mode Specialized Tools"
-  ["07-envoy-deep-inspection.md"]="[Agent] Envoy Deep Inspection Tools"
+  ["05-ambient-mode-tools.md"]="[Agent] Ambient Mode Specialized Tools (ztunnel, waypoint management)"
+  ["06-sidecar-mode-tools.md"]="[Agent] Sidecar-Only Features (Sidecar CRD, exportTo, injection)"
+  ["07-envoy-deep-inspection.md"]="[Agent] Envoy Proxy Inspection & Deep Analysis (all proxy types)"
   ["08-testing-docs.md"]="[Agent] Testing, Documentation & UX"
 )
 

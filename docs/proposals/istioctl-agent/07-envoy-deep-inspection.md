@@ -1,33 +1,196 @@
-# Sub-issue 7: Envoy Deep Inspection Tools
+# Sub-issue 7: Envoy Proxy Inspection & Deep Analysis Tools
 
 **Labels**: `enhancement`, `area/istioctl`  
 **Parent**: [Epic] istioctl AI Troubleshooting Agent
 
 ## Summary
 
-Implement advanced Envoy proxy inspection tools that go beyond the standard proxy-config commands, including real-time stats analysis, log level management, access log parsing, Envoy response flag interpretation, and detailed filter chain analysis.
+Implement Envoy proxy inspection tools that work on **any Envoy-based proxy** — sidecars, waypoint proxies (ambient mode), and ingress/egress gateways. These tools wrap `istioctl proxy-config` and Envoy admin API capabilities. Since waypoint proxies are Envoy instances with listeners, clusters, routes, and endpoints, all of these tools are shared across data plane modes.
+
+Also includes advanced Envoy inspection tools: real-time stats analysis, log level management, access log parsing, Envoy response flag interpretation, and config drift detection.
 
 ## Motivation
 
-Envoy provides a wealth of debugging information through its admin API that istioctl only partially exposes. For advanced troubleshooting, the agent needs access to Envoy stats (connection counts, error rates, circuit breaker state), the ability to adjust log levels dynamically, and intelligence to interpret Envoy response flags and access log patterns.
+Envoy is the common data plane across all Istio deployment modes. Whether debugging a sidecar, a waypoint proxy, or an ingress gateway, the same Envoy admin API and XDS concepts apply:
+- **Clusters** represent upstream service groups
+- **Listeners** handle incoming connections
+- **Routes** match requests to clusters
+- **Endpoints** are the actual backend IPs
+- **Secrets** hold mTLS certificates
+
+The key differences between proxy types are in the _content_ of these resources, not the _tools_ used to inspect them:
+- **Sidecars** have outbound listeners (VirtualOutbound on 15001) + inbound listeners (on 15006)
+- **Waypoints** have ONLY inbound listeners (HBONE termination on 15008 + internal)
+- **Gateways** have listeners for their configured ports
 
 ## Detailed Design
 
-### 1. Envoy Stats Tool
+### Standard Proxy-Config Tools (All Proxy Types)
 
-**EnvoyStatsTool** — wraps `istioctl x envoy-stats`
+#### ProxyConfigClusterTool — wraps `istioctl proxy-config cluster`
 ```go
-type EnvoyStatsInput struct {
-    PodName   string `json:"pod_name" jsonschema:"required"`
+type ProxyConfigClusterInput struct {
+    PodName   string `json:"pod_name" jsonschema:"required,description=Any Envoy proxy pod (sidecar, waypoint, or gateway)"`
     Namespace string `json:"namespace" jsonschema:"required"`
-    Type      string `json:"type,omitempty" jsonschema:"enum=server,clusters,description=Stats type (default: server)"`
-    Filter    string `json:"filter,omitempty" jsonschema:"description=Filter stats by pattern (e.g., cluster.outbound|9080||reviews.default)"`
+    FQDN      string `json:"fqdn,omitempty" jsonschema:"description=Filter by service FQDN"`
+    Port      int    `json:"port,omitempty" jsonschema:"description=Filter by port"`
+    Direction string `json:"direction,omitempty" jsonschema:"enum=inbound,outbound"`
 }
-type EnvoyStatsOutput struct {
-    Stats   map[string]interface{} `json:"stats"`
-    Summary string                 `json:"summary"`
+type ProxyConfigClusterOutput struct {
+    ProxyType string         `json:"proxy_type"` // sidecar, waypoint, gateway
+    Clusters  []EnvoyCluster `json:"clusters"`
+    Summary   string         `json:"summary"`
+}
+type EnvoyCluster struct {
+    Name            string `json:"name"`
+    FQDN            string `json:"fqdn"`
+    Port            int    `json:"port"`
+    Subset          string `json:"subset,omitempty"`
+    Direction       string `json:"direction"`
+    Type            string `json:"type"` // EDS, STATIC, STRICT_DNS, etc.
+    DestinationRule string `json:"destination_rule,omitempty"`
 }
 ```
+- **Applies to**: Sidecar, Waypoint, Gateway
+- **When to use**: Check if Envoy knows about a destination service, verify DestinationRule application
+- **Data source**: Envoy admin API `config_dump?mask=dynamic_active_clusters,...`
+- **Sidecar vs Waypoint**: Sidecars have outbound clusters for all visible services; waypoints have inbound clusters for services they manage
+
+#### ProxyConfigListenerTool — wraps `istioctl proxy-config listener`
+```go
+type ProxyConfigListenerInput struct {
+    PodName   string `json:"pod_name" jsonschema:"required,description=Any Envoy proxy pod"`
+    Namespace string `json:"namespace" jsonschema:"required"`
+    Port      int    `json:"port,omitempty"`
+    Type      string `json:"type,omitempty" jsonschema:"enum=HTTP,TCP,HTTP+TCP"`
+    Address   string `json:"address,omitempty"`
+}
+type ProxyConfigListenerOutput struct {
+    ProxyType string          `json:"proxy_type"`
+    Listeners []EnvoyListener `json:"listeners"`
+    Summary   string          `json:"summary"`
+}
+type EnvoyListener struct {
+    Name     string `json:"name"`
+    Address  string `json:"address"`
+    Port     int    `json:"port"`
+    Protocol string `json:"protocol"` // HTTP, TCP, HTTP+TCP
+    Chains   int    `json:"filter_chain_count"`
+}
+```
+- **Applies to**: Sidecar, Waypoint, Gateway
+- **When to use**: Check if traffic is being intercepted/handled on the right ports
+- **Sidecar**: Has VirtualOutbound (15001), VirtualInbound (15006)
+- **Waypoint**: Has HBONE connect-terminate (15008), internal inbound listeners
+- **Gateway**: Has listeners for configured ports (80, 443, etc.)
+
+#### ProxyConfigRouteTool — wraps `istioctl proxy-config route`
+```go
+type ProxyConfigRouteInput struct {
+    PodName   string `json:"pod_name" jsonschema:"required,description=Any Envoy proxy pod"`
+    Namespace string `json:"namespace" jsonschema:"required"`
+    RouteName string `json:"route_name,omitempty"`
+}
+type ProxyConfigRouteOutput struct {
+    ProxyType string       `json:"proxy_type"`
+    Routes    []EnvoyRoute `json:"routes"`
+    Summary   string       `json:"summary"`
+}
+type EnvoyRoute struct {
+    Name           string `json:"name"`
+    VirtualHost    string `json:"virtual_host"`
+    Domains        string `json:"domains"`
+    Match          string `json:"match"`
+    VirtualService string `json:"virtual_service,omitempty"`
+}
+```
+- **Applies to**: Sidecar, Waypoint, Gateway
+- **When to use**: Debug routing decisions, verify VirtualService application
+- **Waypoint context**: Shows how the waypoint routes traffic to backend services
+
+#### ProxyConfigEndpointTool — wraps `istioctl proxy-config endpoint`
+```go
+type ProxyConfigEndpointInput struct {
+    PodName   string `json:"pod_name" jsonschema:"required,description=Any Envoy proxy pod"`
+    Namespace string `json:"namespace" jsonschema:"required"`
+    Cluster   string `json:"cluster,omitempty" jsonschema:"description=Filter by cluster name"`
+    Status    string `json:"status,omitempty" jsonschema:"enum=HEALTHY,UNHEALTHY,UNKNOWN"`
+}
+type ProxyConfigEndpointOutput struct {
+    ProxyType string          `json:"proxy_type"`
+    Endpoints []EnvoyEndpoint `json:"endpoints"`
+    Summary   string          `json:"summary"`
+}
+type EnvoyEndpoint struct {
+    Cluster string `json:"cluster"`
+    Address string `json:"address"`
+    Port    int    `json:"port"`
+    Status  string `json:"status"` // HEALTHY, UNHEALTHY, UNKNOWN
+}
+```
+- **Applies to**: Sidecar, Waypoint, Gateway
+- **When to use**: Check endpoint health, verify service discovery
+
+#### ProxyConfigSecretTool — wraps `istioctl proxy-config secret`
+```go
+type ProxyConfigSecretInput struct {
+    PodName   string `json:"pod_name" jsonschema:"required,description=Any Envoy proxy pod"`
+    Namespace string `json:"namespace" jsonschema:"required"`
+}
+type ProxyConfigSecretOutput struct {
+    ProxyType string        `json:"proxy_type"`
+    Secrets   []EnvoySecret `json:"secrets"`
+    Summary   string        `json:"summary"`
+}
+type EnvoySecret struct {
+    Name       string    `json:"name"`
+    Type       string    `json:"type"` // Cert, Root CA, Validation Context
+    ValidFrom  time.Time `json:"valid_from"`
+    ValidUntil time.Time `json:"valid_until"`
+    SerialNum  string    `json:"serial_number"`
+}
+```
+- **Applies to**: Sidecar, Waypoint, Gateway
+- **When to use**: Debug mTLS certificate issues, check cert expiration
+
+### XDS Sync & Comparison Tools (All Proxy Types)
+
+#### ProxyConfigDiffTool — wraps `istioctl proxy-status <pod>`
+```go
+type ProxyConfigDiffInput struct {
+    PodName   string `json:"pod_name" jsonschema:"required,description=Any Envoy proxy pod"`
+    Namespace string `json:"namespace" jsonschema:"required"`
+}
+type ProxyConfigDiffOutput struct {
+    ProxyType    string `json:"proxy_type"`
+    ClusterDiff  string `json:"cluster_diff,omitempty"`
+    ListenerDiff string `json:"listener_diff,omitempty"`
+    RouteDiff    string `json:"route_diff,omitempty"`
+    InSync       bool   `json:"in_sync"`
+    Summary      string `json:"summary"`
+}
+```
+- **Applies to**: Sidecar, Waypoint, Gateway
+- **When to use**: Detect config drift between what istiod sent and what Envoy has
+- **Wraps**: `istioctl/pkg/writer/compare/` comparator
+
+### Advanced Envoy Inspection Tools
+
+#### EnvoyStatsTool — wraps `istioctl x envoy-stats`
+```go
+type EnvoyStatsInput struct {
+    PodName   string `json:"pod_name" jsonschema:"required,description=Any Envoy proxy pod"`
+    Namespace string `json:"namespace" jsonschema:"required"`
+    Type      string `json:"type,omitempty" jsonschema:"enum=server,clusters,description=Stats type (default: server)"`
+    Filter    string `json:"filter,omitempty" jsonschema:"description=Filter stats by pattern"`
+}
+type EnvoyStatsOutput struct {
+    ProxyType string                 `json:"proxy_type"`
+    Stats     map[string]interface{} `json:"stats"`
+    Summary   string                 `json:"summary"`
+}
+```
+- **Applies to**: Sidecar, Waypoint, Gateway
 - **When to use**: Check circuit breaker status, connection pool health, upstream error rates
 - **Data source**: Envoy admin API `/stats?format=json` or `/clusters?format=json`
 
@@ -41,15 +204,13 @@ type EnvoyStatsOutput struct {
 - `listener.*.downstream_cx_active` — Active downstream connections
 - `server.live` — Whether the proxy is live
 
-### 2. Envoy Log Level Tool
-
-**EnvoyLogLevelTool** — wraps `istioctl proxy-config log`
+#### EnvoyLogLevelTool — wraps `istioctl proxy-config log`
 ```go
 type EnvoyLogLevelInput struct {
-    PodName   string `json:"pod_name" jsonschema:"required"`
+    PodName   string `json:"pod_name" jsonschema:"required,description=Any Envoy proxy pod"`
     Namespace string `json:"namespace" jsonschema:"required"`
-    Level     string `json:"level,omitempty" jsonschema:"enum=trace,debug,info,warning,error,critical,off,description=Set all loggers to this level"`
-    Loggers   map[string]string `json:"loggers,omitempty" jsonschema:"description=Set specific loggers (e.g., {\"http\": \"debug\", \"connection\": \"trace\"})"`
+    Level     string `json:"level,omitempty" jsonschema:"enum=trace,debug,info,warning,error,critical,off"`
+    Loggers   map[string]string `json:"loggers,omitempty" jsonschema:"description=Set specific loggers"`
     Reset     bool   `json:"reset,omitempty" jsonschema:"description=Reset to default log levels"`
 }
 type EnvoyLogLevelOutput struct {
@@ -57,23 +218,35 @@ type EnvoyLogLevelOutput struct {
     Summary       string            `json:"summary"`
 }
 ```
+- **Applies to**: Sidecar, Waypoint, Gateway
+- **Mutating**: YES — requires user confirmation
 - **When to use**: Temporarily increase logging for debugging, then reset
-- **Mutating**: YES — requires user confirmation (changes proxy behavior)
-- **Data source**: Envoy admin API POST `/logging`
 
-**Key Envoy loggers**:
-- `http` — HTTP connection manager
-- `connection` — TCP connections
-- `upstream` — Upstream connection management
-- `router` — HTTP routing decisions
-- `rbac` — RBAC/authorization decisions
-- `jwt` — JWT authentication
-- `lua` — Lua filter
-- `wasm` — WASM filter
+**Key Envoy loggers**: `http`, `connection`, `upstream`, `router`, `rbac`, `jwt`, `lua`, `wasm`
 
-### 3. Envoy Response Flag Interpreter
+#### EnvoyBootstrapTool — wraps `istioctl proxy-config bootstrap`
+```go
+type EnvoyBootstrapInput struct {
+    PodName   string `json:"pod_name" jsonschema:"required,description=Any Envoy proxy pod"`
+    Namespace string `json:"namespace" jsonschema:"required"`
+}
+type EnvoyBootstrapOutput struct {
+    ProxyType     string            `json:"proxy_type"`
+    IstioVersion  string            `json:"istio_version"`
+    EnvoyVersion  string            `json:"envoy_version"`
+    MeshID        string            `json:"mesh_id"`
+    ClusterID     string            `json:"cluster_id"`
+    NodeMetadata  map[string]string `json:"node_metadata"`
+    DiscoveryAddr string            `json:"discovery_address"`
+    Summary       string            `json:"summary"`
+}
+```
+- **Applies to**: Sidecar, Waypoint, Gateway
+- **When to use**: Check proxy version, control plane connectivity, node metadata
 
-**ResponseFlagTool** — interprets Envoy response flags from access logs
+### Offline Analysis Tools (No Cluster Access Required)
+
+#### ResponseFlagTool — interprets Envoy response flags from access logs
 ```go
 type ResponseFlagInput struct {
     Flags string `json:"flags" jsonschema:"required,description=Envoy response flags string (e.g., NR, UF, URX, DC)"`
@@ -109,12 +282,7 @@ type FlagExplanation struct {
 | `SI` | Stream idle timeout | No data transferred |
 | `DPE` | Downstream protocol error | Invalid HTTP from client |
 
-- **When to use**: User reports specific response codes or pastes access log lines
-- **No cluster access needed**: Pure interpretation tool
-
-### 4. Access Log Parser Tool
-
-**AccessLogParserTool** — parses and interprets Envoy access logs
+#### AccessLogParserTool — parses and interprets Envoy access logs
 ```go
 type AccessLogParserInput struct {
     LogLine string `json:"log_line" jsonschema:"required,description=Raw Envoy access log line to parse"`
@@ -141,20 +309,18 @@ type AccessLogParserOutput struct {
     Summary           string            `json:"summary"`
 }
 ```
-- **When to use**: User pastes an access log line and wants to understand it
-- **Parses**: Istio's default access log format (`[%START_TIME%] "%REQ(:METHOD)%" ...`)
+- **Parses**: Istio's default access log format from any Envoy proxy (sidecar, waypoint, or gateway)
 
-### 5. Envoy Config Dump Analysis Tool
-
-**EnvoyConfigAnalysisTool** — deep analysis of Envoy configuration
+#### EnvoyConfigAnalysisTool — deep analysis of Envoy configuration
 ```go
 type EnvoyConfigAnalysisInput struct {
-    PodName    string `json:"pod_name" jsonschema:"required"`
+    PodName    string `json:"pod_name" jsonschema:"required,description=Any Envoy proxy pod"`
     Namespace  string `json:"namespace" jsonschema:"required"`
-    Focus      string `json:"focus,omitempty" jsonschema:"enum=listeners,clusters,routes,secrets,all,description=Which config area to analyze"`
+    Focus      string `json:"focus,omitempty" jsonschema:"enum=listeners,clusters,routes,secrets,all"`
     TargetFQDN string `json:"target_fqdn,omitempty" jsonschema:"description=Analyze config for a specific destination FQDN"`
 }
 type EnvoyConfigAnalysisOutput struct {
+    ProxyType   string        `json:"proxy_type"`
     Issues      []ConfigIssue `json:"issues,omitempty"`
     ConfigPath  string        `json:"config_path,omitempty"` // The path traffic would take
     Summary     string        `json:"summary"`
@@ -166,52 +332,57 @@ type ConfigIssue struct {
     Suggestion  string `json:"suggestion"`
 }
 ```
+- **Applies to**: Sidecar, Waypoint, Gateway
 - **When to use**: Deep dive into Envoy configuration for a specific traffic path
-- **Analysis includes**:
-  - Filter chain matching for a specific destination
-  - Route matching verification
-  - Cluster health and circuit breaker configuration
-  - TLS context verification
-  - Missing or misconfigured filter chains
+- **Analysis includes**: Filter chain matching, route verification, cluster health, TLS context, missing filter chains
 
-### 6. Envoy Bootstrap Info Tool
+### Cross-Mode Troubleshooting Workflows
 
-**EnvoyBootstrapTool** — wraps `istioctl proxy-config bootstrap`
-```go
-type EnvoyBootstrapInput struct {
-    PodName   string `json:"pod_name" jsonschema:"required"`
-    Namespace string `json:"namespace" jsonschema:"required"`
-}
-type EnvoyBootstrapOutput struct {
-    IstioVersion  string            `json:"istio_version"`
-    EnvoyVersion  string            `json:"envoy_version"`
-    MeshID        string            `json:"mesh_id"`
-    ClusterID     string            `json:"cluster_id"`
-    NodeMetadata  map[string]string `json:"node_metadata"`
-    DiscoveryAddr string            `json:"discovery_address"`
-    Summary       string            `json:"summary"`
-}
-```
-- **When to use**: Check proxy version, control plane connectivity, node metadata
+These workflows apply regardless of data plane mode since they use shared Envoy inspection tools:
+
+#### Workflow: "503 errors from my service"
+1. `ClusterModeTool` — Detect if source/destination are sidecar or ambient
+2. `ProxyStatusTool` — Check if proxy is in sync with istiod
+3. `ProxyConfigClusterTool` — Check destination cluster exists (on sidecar or waypoint)
+4. `ProxyConfigEndpointTool` — Check endpoints are HEALTHY
+5. `ProxyConfigRouteTool` — Check route matches correctly
+6. `ProxyConfigSecretTool` — Check if mTLS certs are valid
+7. `KubernetesPodLogsTool(container=istio-proxy)` — Check proxy logs for errors
+8. If mTLS issue: Check PeerAuthentication and DestinationRule TLS settings
+
+#### Workflow: "mTLS handshake failure"
+1. `ProxyConfigSecretTool` on both source and destination proxies — Check certs
+2. `DescribePodTool` — Check PeerAuthentication mode
+3. `AuthzCheckTool` — Check AuthorizationPolicies (works on both sidecar and waypoint)
+4. `BoundaryCheck(CertManager)` — Check if using external CA
+5. Guide: STRICT mode requires both sides to have valid mTLS certs
 
 ## Implementation Steps
 
-1. [ ] Implement `EnvoyStatsTool` with key metrics extraction
-2. [ ] Implement `EnvoyLogLevelTool` with confirmation flow
-3. [ ] Implement `ResponseFlagTool` with comprehensive flag database
-4. [ ] Implement `AccessLogParserTool` for Istio's default log format
-5. [ ] Implement `EnvoyConfigAnalysisTool` for deep config analysis
-6. [ ] Implement `EnvoyBootstrapTool`
-7. [ ] Create Envoy response flag reference data
-8. [ ] Create access log format parser
-9. [ ] Write unit tests
-10. [ ] Write integration tests with mock Envoy admin responses
+1. [ ] Implement `ProxyConfigClusterTool` (all proxy types)
+2. [ ] Implement `ProxyConfigListenerTool` (all proxy types)
+3. [ ] Implement `ProxyConfigRouteTool` (all proxy types)
+4. [ ] Implement `ProxyConfigEndpointTool` (all proxy types)
+5. [ ] Implement `ProxyConfigSecretTool` (all proxy types)
+6. [ ] Implement `ProxyConfigDiffTool` (all proxy types)
+7. [ ] Implement `EnvoyStatsTool` (all proxy types)
+8. [ ] Implement `EnvoyLogLevelTool` with confirmation flow (all proxy types)
+9. [ ] Implement `EnvoyBootstrapTool` (all proxy types)
+10. [ ] Implement `ResponseFlagTool` (offline)
+11. [ ] Implement `AccessLogParserTool` (offline)
+12. [ ] Implement `EnvoyConfigAnalysisTool` (all proxy types)
+13. [ ] Encode cross-mode troubleshooting workflows in system prompt
+14. [ ] Write unit tests with mock Envoy config dumps for sidecar, waypoint, and gateway
+15. [ ] Write integration tests
 
 ## Acceptance Criteria
 
+- [ ] All proxy-config tools work on sidecar, waypoint, AND gateway proxies
+- [ ] Tools detect proxy type and include it in output for context
 - [ ] Stats tool surfaces circuit breaker, connection pool, and error metrics
 - [ ] Log level tool requires confirmation before changing levels
 - [ ] Response flag interpreter covers all documented Envoy flags
-- [ ] Access log parser handles Istio's default format and common variations
+- [ ] Access log parser handles Istio's default format from any proxy type
 - [ ] Config analysis tool can trace a traffic path through listeners → routes → clusters → endpoints
-- [ ] All tools work with both sidecar and gateway proxies
+- [ ] Config diff tool detects drift for any proxy type
+- [ ] Output acknowledges differences (e.g., "waypoint only has inbound listeners" is not flagged as an issue)

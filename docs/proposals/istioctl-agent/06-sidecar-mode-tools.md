@@ -1,131 +1,98 @@
-# Sub-issue 6: Sidecar Mode Specialized Tools
+# Sub-issue 6: Sidecar-Only Features & Injection Tools
 
 **Labels**: `enhancement`, `area/istioctl`  
 **Parent**: [Epic] istioctl AI Troubleshooting Agent
 
 ## Summary
 
-Implement specialized agent tools for debugging sidecar-mode deployments, including proxy configuration inspection, XDS sync verification, sidecar injection diagnostics, and sidecar-specific troubleshooting workflows.
+Implement agent tools for features that are **truly sidecar-only** — specifically the Sidecar CRD (configuration scoping, exportTo), sidecar injection diagnostics, and outbound traffic interception patterns. These features have no ambient mode equivalent because waypoint proxies use a different architectural model.
+
+> **Important note**: Envoy proxy-config tools (cluster, listener, route, endpoint, secret) are NOT sidecar-only. Waypoint proxies are also Envoy proxies and have listeners, clusters, routes, etc. Those tools are in [Sub-issue 07: Envoy Proxy Inspection Tools](./07-envoy-deep-inspection.md).
 
 ## Motivation
 
-Sidecar mode is the traditional and still widely-used Istio data plane. Debugging sidecar issues requires inspecting per-pod Envoy configuration, verifying XDS synchronization with istiod, checking injection status, and understanding iptables traffic redirection. These tools wrap existing `proxy-config` and `proxy-status` commands with structured output.
+Certain Istio features exist only in sidecar mode because they depend on the per-pod proxy architecture:
+
+1. **Sidecar CRD**: Controls per-workload egress/ingress listener configuration and visibility scoping. Waypoint proxies use a synthetic default scope that imports all exported services — they ignore the Sidecar CRD entirely.
+2. **exportTo**: Service and VirtualService visibility scoping. In ambient mode, waypoints use `DefaultSidecarScopeForGateway()` which imports all exported services without per-workload filtering.
+3. **Outbound traffic interception**: The virtual outbound listener (iptables-based `UseOriginalDst`) only exists on sidecar proxies. Waypoints only have inbound listeners.
+4. **Sidecar injection**: The mutating webhook that adds istio-proxy containers. Ambient mode uses namespace labels and ztunnel instead.
 
 ## Detailed Design
 
-### Proxy Configuration Tools
+### Sidecar CRD & Configuration Scoping Tools
 
-#### ProxyConfigClusterTool — wraps `istioctl proxy-config cluster`
+#### SidecarScopeTool — inspects effective Sidecar CRD configuration
 ```go
-type ProxyConfigClusterInput struct {
-    PodName   string `json:"pod_name" jsonschema:"required"`
+type SidecarScopeInput struct {
+    PodName   string `json:"pod_name" jsonschema:"required,description=Pod to check sidecar scope for"`
     Namespace string `json:"namespace" jsonschema:"required"`
-    FQDN      string `json:"fqdn,omitempty" jsonschema:"description=Filter by service FQDN"`
-    Port      int    `json:"port,omitempty" jsonschema:"description=Filter by port"`
-    Direction string `json:"direction,omitempty" jsonschema:"enum=inbound,outbound"`
 }
-type ProxyConfigClusterOutput struct {
-    Clusters []EnvoyCluster `json:"clusters"`
-    Summary  string         `json:"summary"`
+type SidecarScopeOutput struct {
+    HasSidecarCRD     bool              `json:"has_sidecar_crd"`
+    SidecarName       string            `json:"sidecar_name,omitempty"`
+    EgressListeners   []EgressListener  `json:"egress_listeners,omitempty"`
+    IngressListeners  []IngressListener `json:"ingress_listeners,omitempty"`
+    OutboundPolicy    string            `json:"outbound_policy"` // ALLOW_ANY or REGISTRY_ONLY
+    ImportedServices  int               `json:"imported_services"`
+    Summary           string            `json:"summary"`
 }
-type EnvoyCluster struct {
-    Name            string `json:"name"`
-    FQDN            string `json:"fqdn"`
+type EgressListener struct {
+    Port  int      `json:"port,omitempty"`
+    Bind  string   `json:"bind,omitempty"`
+    Hosts []string `json:"hosts"` // namespace/host format
+}
+type IngressListener struct {
     Port            int    `json:"port"`
-    Subset          string `json:"subset,omitempty"`
-    Direction       string `json:"direction"`
-    Type            string `json:"type"` // EDS, STATIC, STRICT_DNS, etc.
-    DestinationRule string `json:"destination_rule,omitempty"`
+    Protocol        string `json:"protocol"`
+    DefaultEndpoint string `json:"default_endpoint"`
+    TLS             bool   `json:"tls"`
 }
 ```
-- **When to use**: Check if Envoy knows about a destination service, verify DestinationRule application
-- **Data source**: Envoy admin API `config_dump?mask=dynamic_active_clusters,...`
+- **When to use**: Debug service visibility issues where a sidecar can't see a destination service
+- **Data source**: istiod debug endpoint `/debug/sidecarz` or XDS query
+- **Mode**: Sidecar only — waypoints don't use Sidecar CRD
+- **Key insight**: If no Sidecar CRD matches a workload, it uses a default scope that imports everything. Custom Sidecar CRDs restrict visibility.
 
-#### ProxyConfigListenerTool — wraps `istioctl proxy-config listener`
+#### ExportToAnalysisTool — checks service/VirtualService visibility
 ```go
-type ProxyConfigListenerInput struct {
-    PodName   string `json:"pod_name" jsonschema:"required"`
-    Namespace string `json:"namespace" jsonschema:"required"`
-    Port      int    `json:"port,omitempty"`
-    Type      string `json:"type,omitempty" jsonschema:"enum=HTTP,TCP,HTTP+TCP"`
-    Address   string `json:"address,omitempty"`
+type ExportToInput struct {
+    ServiceName string `json:"service_name" jsonschema:"required,description=Service to check exportTo for"`
+    Namespace   string `json:"namespace" jsonschema:"required"`
 }
-type ProxyConfigListenerOutput struct {
-    Listeners []EnvoyListener `json:"listeners"`
-    Summary   string          `json:"summary"`
+type ExportToOutput struct {
+    ExportedToNamespaces []string `json:"exported_to_namespaces"`
+    ExportedToAll        bool     `json:"exported_to_all"`
+    VirtualServices      []VSExportInfo `json:"virtual_services,omitempty"`
+    Summary              string   `json:"summary"`
 }
-type EnvoyListener struct {
-    Name     string `json:"name"`
-    Address  string `json:"address"`
-    Port     int    `json:"port"`
-    Protocol string `json:"protocol"` // HTTP, TCP, HTTP+TCP
-    Chains   int    `json:"filter_chain_count"`
+type VSExportInfo struct {
+    Name      string   `json:"name"`
+    Namespace string   `json:"namespace"`
+    ExportTo  []string `json:"export_to"`
 }
 ```
-- **When to use**: Check if traffic is being intercepted on the right ports
-- **Key insight**: Inbound listeners (0.0.0.0:15006) and outbound listener (0.0.0.0:15001) are critical
+- **When to use**: Debug "service not found" issues where exportTo restricts visibility
+- **Mode**: Primarily sidecar — waypoints import all exported services, but exportTo still controls _what_ is exported
+- **Key insight**: `exportTo: ["."]` restricts a service to its own namespace; `exportTo: ["*"]` makes it globally visible
 
-#### ProxyConfigRouteTool — wraps `istioctl proxy-config route`
+#### OutboundPolicyTool — checks outbound traffic policy
 ```go
-type ProxyConfigRouteInput struct {
-    PodName   string `json:"pod_name" jsonschema:"required"`
-    Namespace string `json:"namespace" jsonschema:"required"`
-    RouteName string `json:"route_name,omitempty"`
-}
-type ProxyConfigRouteOutput struct {
-    Routes  []EnvoyRoute `json:"routes"`
-    Summary string       `json:"summary"`
-}
-type EnvoyRoute struct {
-    Name           string `json:"name"`
-    VirtualHost    string `json:"virtual_host"`
-    Domains        string `json:"domains"`
-    Match          string `json:"match"`
-    VirtualService string `json:"virtual_service,omitempty"`
-}
-```
-- **When to use**: Debug routing decisions, verify VirtualService application
-
-#### ProxyConfigEndpointTool — wraps `istioctl proxy-config endpoint`
-```go
-type ProxyConfigEndpointInput struct {
-    PodName   string `json:"pod_name" jsonschema:"required"`
-    Namespace string `json:"namespace" jsonschema:"required"`
-    Cluster   string `json:"cluster,omitempty" jsonschema:"description=Filter by cluster name"`
-    Status    string `json:"status,omitempty" jsonschema:"enum=HEALTHY,UNHEALTHY,UNKNOWN"`
-}
-type ProxyConfigEndpointOutput struct {
-    Endpoints []EnvoyEndpoint `json:"endpoints"`
-    Summary   string          `json:"summary"`
-}
-type EnvoyEndpoint struct {
-    Cluster string `json:"cluster"`
-    Address string `json:"address"`
-    Port    int    `json:"port"`
-    Status  string `json:"status"` // HEALTHY, UNHEALTHY, UNKNOWN
-}
-```
-- **When to use**: Check endpoint health, verify service discovery
-
-#### ProxyConfigSecretTool — wraps `istioctl proxy-config secret`
-```go
-type ProxyConfigSecretInput struct {
+type OutboundPolicyInput struct {
     PodName   string `json:"pod_name" jsonschema:"required"`
     Namespace string `json:"namespace" jsonschema:"required"`
 }
-type ProxyConfigSecretOutput struct {
-    Secrets []EnvoySecret `json:"secrets"`
-    Summary string        `json:"summary"`
-}
-type EnvoySecret struct {
-    Name       string    `json:"name"`
-    Type       string    `json:"type"` // Cert, Root CA, Validation Context
-    ValidFrom  time.Time `json:"valid_from"`
-    ValidUntil time.Time `json:"valid_until"`
-    SerialNum  string    `json:"serial_number"`
+type OutboundPolicyOutput struct {
+    MeshPolicy    string `json:"mesh_policy"`     // ALLOW_ANY or REGISTRY_ONLY
+    SidecarPolicy string `json:"sidecar_policy"`  // Override from Sidecar CRD
+    EffectivePolicy string `json:"effective_policy"`
+    PassthroughClusterExists bool `json:"passthrough_cluster_exists"`
+    Summary       string `json:"summary"`
 }
 ```
-- **When to use**: Debug mTLS certificate issues, check cert expiration
+- **When to use**: Debug "connection refused to external service" issues
+- **Mode**: Sidecar only — waypoints don't have outbound listeners or PassthroughCluster
+- **Key insight**: `REGISTRY_ONLY` blocks traffic to services not in the mesh registry; `ALLOW_ANY` forwards unknown traffic via PassthroughCluster
 
 ### Sidecar Injection Tools
 
@@ -148,6 +115,7 @@ type InjectionStatus struct {
 }
 ```
 - **When to use**: Verify sidecar injection, find pods missing sidecars
+- **Mode**: Sidecar only
 
 #### InjectorStatusTool
 ```go
@@ -164,36 +132,9 @@ type WebhookStatus struct {
 }
 ```
 - **When to use**: Check if sidecar injection webhooks are properly configured
+- **Mode**: Sidecar only
 
-### XDS Sync Comparison Tool
-
-**ProxyConfigDiffTool** — wraps `istioctl proxy-status <pod>` (detailed comparison mode)
-```go
-type ProxyConfigDiffInput struct {
-    PodName   string `json:"pod_name" jsonschema:"required"`
-    Namespace string `json:"namespace" jsonschema:"required"`
-}
-type ProxyConfigDiffOutput struct {
-    ClusterDiff  string `json:"cluster_diff,omitempty"`
-    ListenerDiff string `json:"listener_diff,omitempty"`
-    RouteDiff    string `json:"route_diff,omitempty"`
-    InSync       bool   `json:"in_sync"`
-    Summary      string `json:"summary"`
-}
-```
-- **When to use**: Detect config drift between what istiod sent and what Envoy has
-- **Wraps**: `istioctl/pkg/writer/compare/` comparator
-
-### Sidecar Troubleshooting Workflows
-
-#### Workflow: "503 errors from my service"
-1. `ProxyStatusTool` — Check if sidecar is in sync with istiod
-2. `ProxyConfigClusterTool` — Check destination cluster exists
-3. `ProxyConfigEndpointTool` — Check endpoints are HEALTHY
-4. `ProxyConfigRouteTool` — Check route matches correctly
-5. `ProxyConfigSecretTool` — Check if mTLS certs are valid
-6. `KubernetesPodLogsTool(container=istio-proxy)` — Check sidecar logs for errors
-7. If mTLS issue: Check PeerAuthentication and DestinationRule TLS settings
+### Sidecar-Specific Troubleshooting Workflows
 
 #### Workflow: "Sidecar not injected"
 1. `InjectorStatusTool` — Check webhooks are configured
@@ -202,39 +143,55 @@ type ProxyConfigDiffOutput struct {
 4. `InjectionCheckTool` — Check specific pod injection status
 5. Guide: Check for `sidecar.istio.io/inject: "false"` annotation on pod
 
-#### Workflow: "Traffic routing not working"
+#### Workflow: "Service not visible to sidecar"
+1. `SidecarScopeTool` — Check if a custom Sidecar CRD restricts visibility
+2. `ExportToAnalysisTool` — Check if the target service's exportTo restricts visibility
+3. `ProxyConfigClusterTool` — Verify the destination cluster exists in Envoy
+4. Guide: If using Sidecar CRD, ensure `hosts` includes the target namespace/service
+
+#### Workflow: "Can't reach external service"
+1. `OutboundPolicyTool` — Check if REGISTRY_ONLY blocks external traffic
+2. `ProxyConfigClusterTool` — Check for PassthroughCluster
+3. `AnalyzeTool` — Check for ServiceEntry misconfigurations
+4. Guide: Use ServiceEntry to register external services, or switch to ALLOW_ANY
+
+#### Workflow: "Traffic routing not working (sidecar)"
 1. `AnalyzeTool` — Check for VirtualService/DestinationRule misconfigurations
-2. `ProxyConfigRouteTool` on source pod — Check if route exists
-3. `ProxyConfigClusterTool` on source pod — Check destination cluster and subset
-4. `DescribePodTool` — Trace full traffic path
+2. `SidecarScopeTool` — Check if Sidecar CRD egress listeners import the relevant VS
+3. `ProxyConfigRouteTool` on source pod — Check if route exists
+4. `ProxyConfigClusterTool` on source pod — Check destination cluster and subset
 5. `ProxyConfigDiffTool` — Check for config sync issues
 
-#### Workflow: "mTLS handshake failure"
-1. `ProxyConfigSecretTool` on both source and destination — Check certs
-2. `DescribePodTool` — Check PeerAuthentication mode
-3. `AuthzCheckTool` — Check AuthorizationPolicies
-4. `BoundaryCheck(CertManager)` — Check if using external CA
-5. Guide: STRICT mode requires both sides to have valid mTLS certs
+### What is NOT in this sub-issue
+
+The following tools apply to **all Envoy proxies** (sidecar, waypoint, and gateway) and are covered in [Sub-issue 07](./07-envoy-deep-inspection.md):
+- `proxy-config cluster` — Envoy cluster inspection
+- `proxy-config listener` — Envoy listener inspection
+- `proxy-config route` — Envoy route inspection
+- `proxy-config endpoint` — Envoy endpoint inspection
+- `proxy-config secret` — Envoy secret/certificate inspection
+- `proxy-config bootstrap` — Envoy bootstrap configuration
+- `proxy-config log` — Envoy log level management
+- `proxy-status` (XDS sync) — Works for any proxy connected to istiod
+- `authz check` — RBAC policy extraction from any Envoy config dump
 
 ## Implementation Steps
 
-1. [ ] Implement `ProxyConfigClusterTool`
-2. [ ] Implement `ProxyConfigListenerTool`
-3. [ ] Implement `ProxyConfigRouteTool`
-4. [ ] Implement `ProxyConfigEndpointTool`
-5. [ ] Implement `ProxyConfigSecretTool`
-6. [ ] Implement `InjectionCheckTool`
-7. [ ] Implement `InjectorStatusTool`
-8. [ ] Implement `ProxyConfigDiffTool`
-9. [ ] Encode sidecar troubleshooting workflows in system prompt
-10. [ ] Write unit tests with mock Envoy config dumps
-11. [ ] Write integration tests
+1. [ ] Implement `SidecarScopeTool`
+2. [ ] Implement `ExportToAnalysisTool`
+3. [ ] Implement `OutboundPolicyTool`
+4. [ ] Implement `InjectionCheckTool`
+5. [ ] Implement `InjectorStatusTool`
+6. [ ] Encode sidecar-specific troubleshooting workflows in system prompt
+7. [ ] Write unit tests with mock Sidecar CRD and injection data
+8. [ ] Write integration tests
 
 ## Acceptance Criteria
 
-- [ ] All proxy-config tools return structured data from Envoy config dump
-- [ ] Tools correctly parse config dump protobuf structures
+- [ ] SidecarScope tool correctly reads Sidecar CRD and shows effective scope
+- [ ] ExportTo tool identifies visibility restrictions on services and VirtualServices
+- [ ] OutboundPolicy tool detects REGISTRY_ONLY vs ALLOW_ANY and PassthroughCluster presence
 - [ ] Injection check correctly identifies injected vs non-injected pods
-- [ ] Config diff tool produces meaningful comparison results
 - [ ] Agent follows sidecar-specific troubleshooting workflows
-- [ ] Output includes actionable suggestions for common issues
+- [ ] Tools correctly identify when they're not applicable (e.g., running against a waypoint pod)
+- [ ] Output includes actionable suggestions for common sidecar scoping issues
