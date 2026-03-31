@@ -1496,7 +1496,7 @@ spec:
 				}
 			})
 
-			// Subtest 3: Verify status condition is not set when connect strategy is set without waypoint
+			// Subtest 3: Verify status condition when connect strategy is set without waypoint
 			t.NewSubTest("status condition without waypoint").Run(func(t framework.TestContext) {
 				noWaypointSE := `apiVersion: networking.istio.io/v1
 kind: ServiceEntry
@@ -1529,10 +1529,13 @@ spec:
 					}
 					for _, cond := range se.Status.Conditions {
 						if cond.Type == string(model.ConnectStrategyWithoutWaypoint) {
-							return fmt.Errorf("did not expect condition %s to be present", model.ConnectStrategyWithoutWaypoint)
+							if cond.Status == "False" {
+								return nil
+							}
+							return fmt.Errorf("expected condition status %q, got %q", "False", cond.Status)
 						}
 					}
-					return nil
+					return fmt.Errorf("condition %s not found on ServiceEntry", model.ConnectStrategyWithoutWaypoint)
 				}, retry.Timeout(1*time.Minute))
 			})
 		})
