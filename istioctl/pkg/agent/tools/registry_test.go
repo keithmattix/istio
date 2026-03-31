@@ -22,7 +22,9 @@ import (
 
 func TestRegisterTools(t *testing.T) {
 	r := NewToolRegistry()
-	RegisterTools(r, cli.NewCLIContext(nil))
+	if err := RegisterTools(r, cli.NewCLIContext(nil)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if _, found := r.Get("proxy-status"); !found {
 		t.Fatal("expected proxy-status tool")

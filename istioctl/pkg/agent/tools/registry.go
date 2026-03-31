@@ -60,7 +60,7 @@ func (r *ToolRegistry) AsProviderTools() []providers.ToolSpec {
 	return out
 }
 
-func RegisterTools(registry *ToolRegistry, _ cli.Context) {
+func RegisterTools(registry *ToolRegistry, _ cli.Context) error {
 	for _, tool := range []Tool{
 		{
 			Name:        "proxy-status",
@@ -83,6 +83,9 @@ func RegisterTools(registry *ToolRegistry, _ cli.Context) {
 			},
 		},
 	} {
-		_ = registry.Register(tool)
+		if err := registry.Register(tool); err != nil {
+			return err
+		}
 	}
+	return nil
 }

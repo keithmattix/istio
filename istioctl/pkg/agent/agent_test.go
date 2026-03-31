@@ -33,6 +33,15 @@ func (f fakeProvider) Generate(_ context.Context, messages []providers.Message, 
 	return "final: " + messages[len(messages)-1].Content, nil
 }
 
+type capturingProviderFactory struct {
+	last providers.Config
+}
+
+func (c *capturingProviderFactory) newClient(cfg providers.Config) (providers.Client, error) {
+	c.last = cfg
+	return fakeProvider{}, nil
+}
+
 func TestCmdHasRequiredFlags(t *testing.T) {
 	cmd := Cmd(cli.NewCLIContext(nil))
 	for _, f := range []string{
@@ -53,10 +62,9 @@ func TestCmdHasRequiredFlags(t *testing.T) {
 }
 
 func TestRunNonInteractive(t *testing.T) {
+	factory := &capturingProviderFactory{}
 	oldFactory := newProviderClient
-	newProviderClient = func(providers.Config) (providers.Client, error) {
-		return fakeProvider{}, nil
-	}
+	newProviderClient = factory.newClient
 	t.Cleanup(func() { newProviderClient = oldFactory })
 
 	t.Setenv("ISTIOCTL_AI_PROVIDER", "ollama")
@@ -71,6 +79,9 @@ func TestRunNonInteractive(t *testing.T) {
 	}
 	if got := out.String(); !strings.Contains(got, "final: why are requests failing") {
 		t.Fatalf("unexpected output: %s", got)
+	}
+	if factory.last.Provider != "ollama" {
+		t.Fatalf("expected provider from env to be used, got %q", factory.last.Provider)
 	}
 }
 

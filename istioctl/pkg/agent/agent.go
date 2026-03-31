@@ -75,7 +75,9 @@ func run(ctx context.Context, cliCtx cli.Context, out io.Writer, in io.Reader, c
 	}
 
 	registry := tools.NewToolRegistry()
-	tools.RegisterTools(registry, cliCtx)
+	if err := tools.RegisterTools(registry, cliCtx); err != nil {
+		return err
+	}
 	loop := NewLoop(cfg, client, registry)
 	formatter := output.Formatter{Verbose: cfg.Verbose}
 
