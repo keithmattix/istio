@@ -1195,10 +1195,13 @@ const (
 	// WaypointMissing is set on a ServiceEntry with a wildcard hostname and not bound to a waypoint.
 	// It is used to inform the user that the ServiceEntry will not be active until it is bound to a waypoint.
 	WaypointMissing ConditionType = "istio.io/WaypointMissing"
-	// ConnectStrategyWithoutWaypoint is deprecated and retained for backwards compatibility with older status conditions.
+	// ConnectStrategyWithoutWaypoint is deprecated as of 1.30 and retained for backwards compatibility with older status conditions.
+	// If present on existing resources, it will be pruned during status reconciliation.
 	ConnectStrategyWithoutWaypoint ConditionType = "istio.io/ConnectStrategyWithoutWaypoint"
 
 	NoWaypointForWildcardService string = "NoWaypointForWildcardService"
+	// NoWaypointForConnectStrategyCondition is deprecated as of 1.30 and retained for backwards compatibility.
+	NoWaypointForConnectStrategyCondition string = "ConnectStrategyRequiresWaypoint"
 )
 
 type ConditionSet = map[ConditionType]*Condition
