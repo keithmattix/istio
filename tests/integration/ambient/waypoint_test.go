@@ -1412,7 +1412,7 @@ metadata:
     istio.io/use-waypoint: connect-strategy-gw
     istio.io/use-waypoint-namespace: {{.EgressNamespace}}
   annotations:
-    ambient.istio.io/connect-strategy: RACE_FIRST_TCP_CONNECT
+    istio.io/connect-strategy: RACE_FIRST_TCP_CONNECT
 spec:
   hosts:
   - fake-connect-strategy.example.com
@@ -1496,14 +1496,14 @@ spec:
 				}
 			})
 
-			// Subtest 3: Verify status condition when connect strategy is set without waypoint
+			// Subtest 3: Verify status condition is not set when connect strategy is set without waypoint
 			t.NewSubTest("status condition without waypoint").Run(func(t framework.TestContext) {
 				noWaypointSE := `apiVersion: networking.istio.io/v1
 kind: ServiceEntry
 metadata:
   name: connect-strategy-no-wp
   annotations:
-    ambient.istio.io/connect-strategy: RACE_FIRST_TCP_CONNECT
+    istio.io/connect-strategy: RACE_FIRST_TCP_CONNECT
 spec:
   hosts:
   - fake-no-waypoint.example.com
@@ -1529,13 +1529,10 @@ spec:
 					}
 					for _, cond := range se.Status.Conditions {
 						if cond.Type == string(model.ConnectStrategyWithoutWaypoint) {
-							if cond.Status == "False" {
-								return nil
-							}
-							return fmt.Errorf("expected condition status %q, got %q", "False", cond.Status)
+							return fmt.Errorf("did not expect condition %s to be present", model.ConnectStrategyWithoutWaypoint)
 						}
 					}
-					return fmt.Errorf("condition %s not found on ServiceEntry", model.ConnectStrategyWithoutWaypoint)
+					return nil
 				}, retry.Timeout(1*time.Minute))
 			})
 		})
