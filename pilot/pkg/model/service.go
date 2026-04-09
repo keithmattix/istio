@@ -811,23 +811,6 @@ const (
 	TrafficDistributionPreferSameNode
 )
 
-type DNSConnectStrategy int
-
-const (
-	// DNSConnectStrategyDefault uses standard connection behavior.
-	DNSConnectStrategyDefault DNSConnectStrategy = iota
-	// DNSConnectStrategyRaceFirstTCPConnect races connections to all resolved IPs and picks the first healthy one.
-	DNSConnectStrategyRaceFirstTCPConnect
-)
-
-// GetDNSConnectStrategy reads the connect strategy from annotations.
-func GetDNSConnectStrategy(annotations map[string]string) DNSConnectStrategy {
-	if strings.EqualFold(annotations["istio.io/connect-strategy"], "RACE_FIRST_TCP_CONNECT") {
-		return DNSConnectStrategyRaceFirstTCPConnect
-	}
-	return DNSConnectStrategyDefault
-}
-
 func GetTrafficDistribution(specValue *string, svcAnnotations, nsAnnotations map[string]string) TrafficDistribution {
 	// 1. Check spec field first (highest priority)
 	if specValue != nil {
@@ -872,6 +855,23 @@ func GetTrafficDistribution(specValue *string, svcAnnotations, nsAnnotations map
 
 	// 4. Default to Any
 	return TrafficDistributionAny
+}
+
+type DNSConnectStrategy int
+
+const (
+	// DNSConnectStrategyDefault uses standard connection behavior.
+	DNSConnectStrategyDefault DNSConnectStrategy = iota
+	// DNSConnectStrategyRaceFirstTCPConnect races connections to all resolved IPs and picks the first healthy one.
+	DNSConnectStrategyRaceFirstTCPConnect
+)
+
+// GetDNSConnectStrategy reads the connect strategy from annotations.
+func GetDNSConnectStrategy(annotations map[string]string) DNSConnectStrategy {
+	if strings.EqualFold(annotations["istio.io/connect-strategy"], "RACE_FIRST_TCP_CONNECT") {
+		return DNSConnectStrategyRaceFirstTCPConnect
+	}
+	return DNSConnectStrategyDefault
 }
 
 // DeepCopy creates a deep copy of ServiceAttributes, but skips internal mutexes.
@@ -1185,6 +1185,28 @@ func (i ServiceInfo) GetStatusTarget() TypedObject {
 	return i.Source
 }
 
+// A subset of ServiceInfo fields that are relevant for xDS generation.
+type XDSServiceInfo struct {
+	Service            *workloadapi.Service
+	DNSConnectStrategy DNSConnectStrategy
+}
+
+func (i XDSServiceInfo) NamespacedName() types.NamespacedName {
+	return types.NamespacedName{Name: i.Service.Name, Namespace: i.Service.Namespace}
+}
+
+func (i XDSServiceInfo) GetName() string {
+	return i.Service.Name
+}
+
+func (i XDSServiceInfo) GetNamespace() string {
+	return i.Service.Namespace
+}
+
+func (i XDSServiceInfo) ResourceName() string {
+	return serviceResourceName(i.Service)
+}
+
 type ConditionType string
 
 const (
@@ -1199,7 +1221,7 @@ const (
 	ConnectStrategyWithoutWaypoint ConditionType = "istio.io/ConnectStrategyWithoutWaypoint"
 
 	NoWaypointForWildcardService          string = "NoWaypointForWildcardService"
-	NoWaypointForConnectStrategyCondition string = "ConnectStrategyRequiresWaypoint"
+	NoWaypointForConnectStrategyCondition string = "NoWaypointForRacingConnectStrategy"
 )
 
 type ConditionSet = map[ConditionType]*Condition
@@ -1271,10 +1293,12 @@ func (i ServiceInfo) GetConditions(currentConditions map[string]Condition) Condi
 			}
 		}
 		if i.DNSConnectStrategy != DNSConnectStrategyDefault && i.Source.Kind == kind.ServiceEntry {
+			msg := "ServiceEntry has a non-default connect strategy but no waypoint bound. " +
+				"A waypoint is required for connect strategies to take effect for ambient clients."
 			set[ConnectStrategyWithoutWaypoint] = &Condition{
-				Status:  false,
+				Status:  true,
 				Reason:  NoWaypointForConnectStrategyCondition,
-				Message: "ServiceEntry has a non-default connect strategy but no waypoint bound. A waypoint is required for connect strategies to take effect.",
+				Message: msg,
 			}
 		}
 	}
@@ -1322,6 +1346,7 @@ func (i ServiceInfo) Equals(other ServiceInfo) bool {
 		maps.Equal(i.LabelSelector.Labels, other.LabelSelector.Labels) &&
 		maps.Equal(i.PortNames, other.PortNames) &&
 		i.Source == other.Source &&
+		i.DNSConnectStrategy == other.DNSConnectStrategy &&
 		i.Scope == other.Scope &&
 		i.Waypoint.Equals(other.Waypoint)
 }

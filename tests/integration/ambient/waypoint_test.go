@@ -1529,13 +1529,85 @@ spec:
 					}
 					for _, cond := range se.Status.Conditions {
 						if cond.Type == string(model.ConnectStrategyWithoutWaypoint) {
-							if cond.Status == "False" {
+							if cond.Status == "True" {
 								return nil
 							}
-							return fmt.Errorf("expected condition status %q, got %q", "False", cond.Status)
+							return fmt.Errorf("expected condition status %q, got %q", "True", cond.Status)
 						}
 					}
 					return fmt.Errorf("condition %s not found on ServiceEntry", model.ConnectStrategyWithoutWaypoint)
+				}, retry.Timeout(1*time.Minute))
+			})
+			// Subtest 4: Verify status condition clears when switching back to default strategy
+			t.NewSubTest("status condition clears on strategy reset").Run(func(t framework.TestContext) {
+				patchRemoveAnnotation := func(name string) error {
+					se, err := t.Clusters().Default().Istio().NetworkingV1().ServiceEntries(apps.Namespace.Name()).
+						Get(context.TODO(), name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+					delete(se.Annotations, "istio.io/connect-strategy")
+					_, err = t.Clusters().Default().Istio().NetworkingV1().ServiceEntries(apps.Namespace.Name()).Update(context.TODO(), se, metav1.UpdateOptions{})
+					return err
+				}
+
+				// Apply ServiceEntry without waypoint and with connect strategy
+				noWaypointSE := `apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: connect-strategy-reset-test
+  annotations:
+    istio.io/connect-strategy: RACE_FIRST_TCP_CONNECT
+spec:
+  hosts:
+  - fake-reset-test.example.com
+  ports:
+  - name: http
+    number: 80
+    protocol: HTTP
+  location: MESH_EXTERNAL
+  resolution: DNS
+  endpoints:
+  - address: external.{{.ExternalNamespace}}.svc.cluster.local`
+				t.ConfigIstio().
+					Eval(apps.Namespace.Name(), map[string]string{
+						"ExternalNamespace": apps.ExternalNamespace.Name(),
+					}, noWaypointSE).
+					ApplyOrFail(t, apply.CleanupConditionally)
+
+				// Verify condition exists
+				retry.UntilSuccessOrFail(t, func() error {
+					se, err := t.Clusters().Default().Istio().NetworkingV1().ServiceEntries(apps.Namespace.Name()).
+						Get(context.TODO(), "connect-strategy-reset-test", metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+					for _, cond := range se.Status.Conditions {
+						if cond.Type == string(model.ConnectStrategyWithoutWaypoint) && cond.Status == "True" {
+							return nil
+						}
+					}
+					return fmt.Errorf("condition %s not found or not set correctly", model.ConnectStrategyWithoutWaypoint)
+				}, retry.Timeout(1*time.Minute))
+
+				// Remove annotation to reset to default strategy
+				if err := patchRemoveAnnotation("connect-strategy-reset-test"); err != nil {
+					t.Fatalf("failed to remove connect-strategy annotation: %v", err)
+				}
+
+				// Verify condition is cleared
+				retry.UntilSuccessOrFail(t, func() error {
+					se, err := t.Clusters().Default().Istio().NetworkingV1().ServiceEntries(apps.Namespace.Name()).
+						Get(context.TODO(), "connect-strategy-reset-test", metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+					for _, cond := range se.Status.Conditions {
+						if cond.Type == string(model.ConnectStrategyWithoutWaypoint) {
+							return fmt.Errorf("condition %s should have been cleared after strategy reset", model.ConnectStrategyWithoutWaypoint)
+						}
+					}
+					return nil
 				}, retry.Timeout(1*time.Minute))
 			})
 		})

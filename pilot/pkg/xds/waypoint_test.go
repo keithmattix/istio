@@ -645,6 +645,7 @@ spec:
 	g.Expect(c).NotTo(BeNil(), "expected inbound-vip cluster for sql.example.com")
 	g.Expect(c.DnsLookupFamily).To(Equal(clusterv3.Cluster_ALL),
 		"connect strategy RACE_FIRST_TCP_CONNECT should set DnsLookupFamily=ALL for happy eyeballs")
+	g.Expect(c.GetType()).To(Equal(clusterv3.Cluster_LOGICAL_DNS), "connect strategy RACE_FIRST_TCP_CONNECT should be a LOGICAL_DNS cluster")
 }
 
 func TestWaypointClusterWithDynamicDNSWithoutWaypoint(t *testing.T) {
