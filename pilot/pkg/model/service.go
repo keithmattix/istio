@@ -1185,7 +1185,8 @@ func (i ServiceInfo) GetStatusTarget() TypedObject {
 	return i.Source
 }
 
-// A subset of ServiceInfo fields that are relevant for xDS generation.
+// A subset of ServiceInfo fields that are relevant for xDS generation
+// to enable correct change detection.
 type XDSServiceInfo struct {
 	Service            *workloadapi.Service
 	DNSConnectStrategy DNSConnectStrategy
