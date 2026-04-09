@@ -1528,14 +1528,14 @@ spec:
 						return err
 					}
 					for _, cond := range se.Status.Conditions {
-						if cond.Type == string(model.ConnectStrategyWithoutWaypoint) {
+						if cond.Type == string(model.WaypointMissing) {
 							if cond.Status == "True" {
 								return nil
 							}
 							return fmt.Errorf("expected condition status %q, got %q", "True", cond.Status)
 						}
 					}
-					return fmt.Errorf("condition %s not found on ServiceEntry", model.ConnectStrategyWithoutWaypoint)
+					return fmt.Errorf("condition %s not found on ServiceEntry", model.WaypointMissing)
 				}, retry.Timeout(1*time.Minute))
 			})
 			// Subtest 4: Verify status condition clears when switching back to default strategy
@@ -1583,17 +1583,18 @@ spec:
 						return err
 					}
 					for _, cond := range se.Status.Conditions {
-						if cond.Type == string(model.ConnectStrategyWithoutWaypoint) && cond.Status == "True" {
+						if cond.Type == string(model.WaypointMissing) && cond.Status == "True" {
 							return nil
 						}
 					}
-					return fmt.Errorf("condition %s not found or not set correctly", model.ConnectStrategyWithoutWaypoint)
+					return fmt.Errorf("condition %s not found or not set correctly", model.WaypointMissing)
 				}, retry.Timeout(1*time.Minute))
 
 				// Remove annotation to reset to default strategy
-				if err := patchRemoveAnnotation("connect-strategy-reset-test"); err != nil {
-					t.Fatalf("failed to remove connect-strategy annotation: %v", err)
-				}
+				var err error
+				retry.UntilSuccessOrFail(t, func() error {
+					return patchRemoveAnnotation("connect-strategy-reset-test")
+				}, retry.Timeout(1*time.Second), retry.Message(fmt.Sprintf("failed to remove connect-strategy annotation: %v", err)))
 
 				// Verify condition is cleared
 				retry.UntilSuccessOrFail(t, func() error {
@@ -1603,8 +1604,8 @@ spec:
 						return err
 					}
 					for _, cond := range se.Status.Conditions {
-						if cond.Type == string(model.ConnectStrategyWithoutWaypoint) {
-							return fmt.Errorf("condition %s should have been cleared after strategy reset", model.ConnectStrategyWithoutWaypoint)
+						if cond.Type == string(model.WaypointMissing) {
+							return fmt.Errorf("condition %s should have been cleared after strategy reset", model.WaypointMissing)
 						}
 					}
 					return nil

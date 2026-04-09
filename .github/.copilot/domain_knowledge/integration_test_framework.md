@@ -178,7 +178,7 @@ The existing `GetCondition` helper in waypoint_test.go only works with `[]metav1
 ### Condition Model
 
 Status conditions are defined in `pilot/pkg/model/service.go`:
-- `ConditionType` is a string alias (e.g., `"istio.io/ConnectStrategyWithoutWaypoint"`)
+- `ConditionType` is a string alias (e.g., `"istio.io/WaypointMissing"`)
 - `model.Condition` has `Status bool` which maps to `"True"`/`"False"` in the IstioCondition
 - `GetConditions()` on `ServiceInfo` returns a `ConditionSet` (map of ConditionType to *Condition)
 - The status queue in `ambient/statusqueue/conversion.go` converts these to `v1alpha1.IstioCondition` for server-side apply
