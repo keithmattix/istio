@@ -1191,6 +1191,10 @@ type XDSServiceInfo struct {
 	DNSConnectStrategy DNSConnectStrategy
 }
 
+func (i *XDSServiceInfo) Equals(other *XDSServiceInfo) bool {
+	return i.DNSConnectStrategy == other.DNSConnectStrategy && proto.Equal(i.Service, other.Service)
+}
+
 func (i XDSServiceInfo) NamespacedName() types.NamespacedName {
 	return types.NamespacedName{Name: i.Service.Name, Namespace: i.Service.Namespace}
 }
