@@ -652,7 +652,7 @@ func TestValidateEnvoyFilter(t *testing.T) {
 					},
 				},
 			},
-			error:   "Envoy filter: applyTo HTTP_FILTER for waypoint must have subfilter name",
+			error:   "Envoy filter: applyTo HTTP_FILTER for waypoint must have subFilter name",
 			warning: "",
 		},
 	}

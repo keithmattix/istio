@@ -126,7 +126,7 @@ func validateEnvoyFilter(cfg config.Config, errs Validation) (Warning, error) {
 				}
 
 				if filterMatch.GetSubFilter() == nil || filterMatch.GetSubFilter().GetName() == "" {
-					errs = validation.AppendValidation(errs, fmt.Errorf("Envoy filter: applyTo %v for waypoint must have subfilter name to match on", cp.ApplyTo)) // nolint: stylecheck,lll
+					errs = validation.AppendValidation(errs, fmt.Errorf("Envoy filter: applyTo %v for waypoint must have subFilter name to match on", cp.ApplyTo)) // nolint: stylecheck,lll
 					continue
 				}
 			}

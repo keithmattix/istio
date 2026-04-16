@@ -242,6 +242,9 @@ func patchFilterChains(patchContext networking.EnvoyFilter_PatchContext,
 	})
 }
 
+// ApplyFilterChainPatches applies EnvoyFilter patches to a single filter chain.
+// This is used for waypoint proxies where filter chains are built per-service and
+// need per-service EnvoyFilter matching.
 func ApplyFilterChainPatches(patchContext networking.EnvoyFilter_PatchContext,
 	efw *model.MergedEnvoyFilterWrapper, lis *listener.Listener, fc *listener.FilterChain,
 ) {
