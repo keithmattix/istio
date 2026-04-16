@@ -42,6 +42,7 @@ import (
 	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/model"
 	istionetworking "istio.io/istio/pilot/pkg/networking"
+	"istio.io/istio/pilot/pkg/networking/core/envoyfilter"
 	"istio.io/istio/pilot/pkg/networking/core/extension"
 	"istio.io/istio/pilot/pkg/networking/core/match"
 	istio_route "istio.io/istio/pilot/pkg/networking/core/route"
@@ -407,6 +408,7 @@ func (lb *ListenerBuilder) buildWaypointInternal(wls []model.WorkloadInfo, svcs 
 		)...))
 
 		portMapper := match.NewDestinationPort()
+		efw := lb.push.EnvoyFilters(lb.node, svc)
 		for _, port := range svc.Ports {
 			if port.Protocol == protocol.UDP {
 				continue
@@ -444,9 +446,10 @@ func (lb *ListenerBuilder) buildWaypointInternal(wls []model.WorkloadInfo, svcs 
 			}
 			cc.clusterName = httpClusterName
 			httpChain = &listener.FilterChain{
-				Filters: append(slices.Clone(filters), lb.buildWaypointInboundHTTPFilters(svc, cc)...),
+				Filters: append(slices.Clone(filters), lb.buildWaypointInboundHTTPFilters(svc, cc, efw)...),
 				Name:    cc.clusterName,
 			}
+			envoyfilter.ApplyFilterChainPatches(networking.EnvoyFilter_WAYPOINT, efw, nil, httpChain)
 			if isAmbientEastWestGateway && features.EnableAmbientMultiNetwork {
 				// If the service has a waypoint, in ambient multi-network we have to account for the possibility that L7
 				// policies have been applied already, and if so, we need to skip the waypoint. So if the service has a
@@ -577,7 +580,7 @@ func (lb *ListenerBuilder) buildWaypointInternal(wls []model.WorkloadInfo, svcs 
 			Filters: append([]*listener.Filter{
 				xdsfilters.ConnectAuthorityNetworkFilter,
 			},
-				lb.buildWaypointInboundHTTPFilters(nil, cc)...),
+				lb.buildWaypointInboundHTTPFilters(nil, cc, nil)...),
 			Name: "direct-http",
 		}
 
@@ -846,12 +849,14 @@ func (lb *ListenerBuilder) buildWaypointHTTPFilters(svc *model.Service) (pre []*
 
 // buildWaypointInboundHTTPFilters builds the network filters that should be inserted before an HCM.
 // This should only be used with HTTP; see buildInboundNetworkFilters for TCP
-func (lb *ListenerBuilder) buildWaypointInboundHTTPFilters(svc *model.Service, cc inboundChainConfig) []*listener.Filter {
+func (lb *ListenerBuilder) buildWaypointInboundHTTPFilters(svc *model.Service, cc inboundChainConfig, efw *model.MergedEnvoyFilterWrapper) []*listener.Filter {
 	pre, post := lb.buildWaypointHTTPFilters(svc)
 	ph := util.GetProxyHeaders(lb.node, lb.push, istionetworking.ListenerClassSidecarInbound)
 	var filters []*listener.Filter
+	routeCfg := buildWaypointInboundHTTPRouteConfig(lb, svc, cc)
+	routeCfg = envoyfilter.ApplyRouteConfigurationPatches(networking.EnvoyFilter_WAYPOINT, lb.node, efw, routeCfg)
 	httpOpts := &httpListenerOpts{
-		routeConfig:      buildWaypointInboundHTTPRouteConfig(lb, svc, cc),
+		routeConfig:      routeCfg,
 		rds:              "", // no RDS for inbound traffic
 		useRemoteAddress: false,
 		connectionManager: &hcm.HttpConnectionManager{
