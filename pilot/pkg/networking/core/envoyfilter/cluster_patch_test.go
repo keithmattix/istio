@@ -196,6 +196,38 @@ func Test_clusterMatch(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			name: "waypoint match infrastructure cluster connect_originate",
+			args: args{
+				proxy:     &model.Proxy{Type: model.Waypoint},
+				operation: networking.EnvoyFilter_Patch_MERGE,
+				matchCondition: &networking.EnvoyFilter_EnvoyConfigObjectMatch{
+					Context: networking.EnvoyFilter_WAYPOINT,
+					ObjectTypes: &networking.EnvoyFilter_EnvoyConfigObjectMatch_Waypoint{
+						Waypoint: &networking.EnvoyFilter_WaypointMatch{},
+					},
+				},
+				cluster: &cluster.Cluster{Name: "connect_originate"},
+			},
+			want: true,
+		},
+		{
+			name: "waypoint not match infrastructure cluster with port",
+			args: args{
+				proxy:     &model.Proxy{Type: model.Waypoint},
+				operation: networking.EnvoyFilter_Patch_MERGE,
+				matchCondition: &networking.EnvoyFilter_EnvoyConfigObjectMatch{
+					Context: networking.EnvoyFilter_WAYPOINT,
+					ObjectTypes: &networking.EnvoyFilter_EnvoyConfigObjectMatch_Waypoint{
+						Waypoint: &networking.EnvoyFilter_WaypointMatch{
+							PortNumber: 80,
+						},
+					},
+				},
+				cluster: &cluster.Cluster{Name: "connect_originate"},
+			},
+			want: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

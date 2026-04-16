@@ -96,20 +96,21 @@ func (configgen *ConfigGeneratorImpl) buildWaypointInboundClusters(
 	proxy *model.Proxy,
 	push *model.PushContext,
 	svcs map[host.Name]*model.Service,
+	cp clusterPatcher,
 ) []*cluster.Cluster {
 	clusters := make([]*cluster.Cluster, 0)
 	// Creates "main_internal" cluster to route to the main internal listener.
 	// Creates "encap" cluster to route to the encap listener.
-	clusters = append(clusters, GetMainInternalCluster(), GetEncapCluster(proxy))
+	clusters = cp.conditionallyAppend(clusters, nil, GetMainInternalCluster(), GetEncapCluster(proxy))
 	// Creates per-VIP load balancing upstreams.
 	clusters = append(clusters, cb.buildWaypointInboundVIP(proxy, push, svcs)...)
 
 	// Upstream of the "encap" listener.
 	if features.EnableAmbientMultiNetwork && isAmbientEastWestGateway(proxy) {
 		// Creates "blackhole" cluster to avoid failures if no globally scoped services exist
-		clusters = append(clusters, cb.buildWaypointForwardInnerConnect(), cb.buildBlackHoleCluster())
+		clusters = cp.conditionallyAppend(clusters, nil, cb.buildWaypointForwardInnerConnect(), cb.buildBlackHoleCluster())
 	} else {
-		clusters = append(clusters, cb.buildWaypointConnectOriginate(proxy, push))
+		clusters = cp.conditionallyAppend(clusters, nil, cb.buildWaypointConnectOriginate(proxy, push))
 	}
 
 	// This bit creates clusters needed to handle requests going to a remote network.
@@ -120,8 +121,9 @@ func (configgen *ConfigGeneratorImpl) buildWaypointInboundClusters(
 	// HBONE tunnel to either a waypoint or service backend as an opaque stream of bytes - E/W gateway does
 	// not know that the data is actually an HBONE tunnel.
 	if model.ShouldCreateDoubleHBONEResources(proxy) {
-		clusters = append(
+		clusters = cp.conditionallyAppend(
 			clusters,
+			nil,
 			cb.buildInnerConnectOriginateCluster(proxy, push),
 			cb.buildOuterConnectOriginateCluster(proxy, push),
 		)
