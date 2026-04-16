@@ -36,13 +36,16 @@ import (
 
 	meshconfig "istio.io/api/mesh/v1alpha1"
 	networking "istio.io/api/networking/v1alpha3"
+	"istio.io/api/type/v1beta1"
 	"istio.io/istio/pilot/pkg/config/memory"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/networking/util"
 	memregistry "istio.io/istio/pilot/pkg/serviceregistry/memory"
+	"istio.io/istio/pilot/pkg/serviceregistry/provider"
 	"istio.io/istio/pilot/pkg/util/protoconv"
 	xdsfilters "istio.io/istio/pilot/pkg/xds/filters"
 	"istio.io/istio/pkg/config"
+	"istio.io/istio/pkg/config/host"
 	"istio.io/istio/pkg/config/mesh/meshwatcher"
 	"istio.io/istio/pkg/config/schema/collections"
 	"istio.io/istio/pkg/config/schema/gvk"
@@ -73,6 +76,38 @@ func buildEnvoyFilterConfigStore(configPatches []*networking.EnvoyFilter_EnvoyCo
 				GroupVersionKind: gvk.EnvoyFilter,
 			},
 			Spec: &networking.EnvoyFilter{
+				ConfigPatches: []*networking.EnvoyFilter_EnvoyConfigObjectPatch{cp},
+			},
+		})
+		if err != nil {
+			log.Errorf("create envoyfilter failed %v", err)
+		}
+	}
+	return store
+}
+
+func buildWaypointEnvoyFilterConfigStoreWithConfig(configPatches []*networking.EnvoyFilter_EnvoyConfigObjectPatch) model.ConfigStoreController {
+	store := memory.NewController(memory.Make(collections.Pilot))
+
+	for i, cp := range configPatches {
+		_, err := store.Create(config.Config{
+			Meta: config.Meta{
+				Name:             fmt.Sprintf("test-envoyfilter-%d", i),
+				Namespace:        "not-default",
+				GroupVersionKind: gvk.EnvoyFilter,
+			},
+			Spec: &networking.EnvoyFilter{
+				TargetRefs: []*v1beta1.PolicyTargetReference{
+					{
+						Kind: "Service",
+						Name: "foo",
+					},
+					{
+						Group: "networking.istio.io",
+						Kind:  "ServiceEntry",
+						Name:  "foo",
+					},
+				},
 				ConfigPatches: []*networking.EnvoyFilter_EnvoyConfigObjectPatch{cp},
 			},
 		})
@@ -2285,6 +2320,7 @@ func TestApplyListenerPatches(t *testing.T) {
 			},
 		},
 	}
+
 	serviceDiscovery := memregistry.NewServiceDiscovery()
 	e := newTestEnvironment(t, serviceDiscovery, testMesh, buildEnvoyFilterConfigStore(configPatches))
 	push := model.NewPushContext()
@@ -2300,6 +2336,7 @@ func TestApplyListenerPatches(t *testing.T) {
 		proxy        *model.Proxy
 		push         *model.PushContext
 		listeners    []*listener.Listener
+		services     []*model.Service
 		skipAdds     bool
 	}
 	tests := []struct {
@@ -2365,11 +2402,193 @@ func TestApplyListenerPatches(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ApplyListenerPatches(tt.args.patchContext, tt.args.push.EnvoyFilters(tt.args.proxy),
+			got := ApplyListenerPatches(tt.args.patchContext, tt.args.push.EnvoyFilters(tt.args.proxy, tt.args.services...),
 				tt.args.listeners, tt.args.skipAdds)
 			if diff := cmp.Diff(tt.want, got, protocmp.Transform()); diff != "" {
 				t.Errorf("ApplyListenerPatches(): %s mismatch (-want +got):\n%s", tt.name, diff)
 			}
 		})
+	}
+}
+
+func TestApplyListenerPatchesWaypoint(t *testing.T) {
+	waypointConfigPatches := []*networking.EnvoyFilter_EnvoyConfigObjectPatch{
+		{
+			ApplyTo: networking.EnvoyFilter_FILTER_CHAIN,
+			Match: &networking.EnvoyFilter_EnvoyConfigObjectMatch{
+				Context:     networking.EnvoyFilter_WAYPOINT,
+				ObjectTypes: &networking.EnvoyFilter_EnvoyConfigObjectMatch_Waypoint{},
+			},
+			Patch: &networking.EnvoyFilter_Patch{
+				Operation: networking.EnvoyFilter_Patch_MERGE,
+				Value: buildPatchStruct(`
+{"transport_socket":{
+"name":"envoy.transport_sockets.tls",
+"typed_config":{
+"@type":"type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext",
+"common_tls_context":{
+"alpn_protocols": [ "h2-6380", "http/1.1-6380" ]}}}}`),
+			},
+		},
+		{
+			ApplyTo: networking.EnvoyFilter_NETWORK_FILTER,
+			Match: &networking.EnvoyFilter_EnvoyConfigObjectMatch{
+				Context: networking.EnvoyFilter_WAYPOINT,
+				ObjectTypes: &networking.EnvoyFilter_EnvoyConfigObjectMatch_Waypoint{
+					Waypoint: &networking.EnvoyFilter_WaypointMatch{
+						Filter: &networking.EnvoyFilter_WaypointMatch_FilterMatch{
+							Name: "envoy.filters.network.http_connection_manager",
+						},
+					},
+				},
+			},
+			Patch: &networking.EnvoyFilter_Patch{
+				Operation: networking.EnvoyFilter_Patch_MERGE,
+				Value: buildPatchStruct(`
+{"name": "envoy.filters.network.http_connection_manager",
+"typed_config": {
+       "@type": "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager",
+        "max_request_headers_kb": 96
+}
+}`),
+			},
+		},
+		{
+			ApplyTo: networking.EnvoyFilter_HTTP_FILTER,
+			Match: &networking.EnvoyFilter_EnvoyConfigObjectMatch{
+				Context: networking.EnvoyFilter_WAYPOINT,
+				ObjectTypes: &networking.EnvoyFilter_EnvoyConfigObjectMatch_Waypoint{
+					Waypoint: &networking.EnvoyFilter_WaypointMatch{
+						Filter: &networking.EnvoyFilter_WaypointMatch_FilterMatch{
+							Name: "envoy.filters.network.http_connection_manager",
+							SubFilter: &networking.EnvoyFilter_WaypointMatch_FilterMatch_SubFilterMatch{
+								Name: "http-filter-5",
+							},
+						},
+					},
+				},
+			},
+			Patch: &networking.EnvoyFilter_Patch{
+				Operation: networking.EnvoyFilter_Patch_REMOVE,
+			},
+		},
+	}
+
+	faultFilterOutAny := protoconv.MessageToAny(&fault.HTTPFault{
+		UpstreamCluster: "scooby",
+		DownstreamNodes: []string{"foo"},
+	})
+	waypointIn := []*listener.Listener{
+		{
+			Name:              "main_internal",
+			ListenerSpecifier: &listener.Listener_InternalListener{},
+			FilterChains: []*listener.FilterChain{
+				{
+					Name: "inbound-vip|8000|http|foo.not-default.svc.cluster.local",
+					Filters: []*listener.Filter{
+						{
+							Name: wellknown.HTTPConnectionManager,
+							ConfigType: &listener.Filter_TypedConfig{
+								TypedConfig: protoconv.MessageToAny(&hcm.HttpConnectionManager{
+									HttpFilters: []*hcm.HttpFilter{
+										{Name: "http-filter0"},
+										{
+											Name:       wellknown.Fault,
+											ConfigType: &hcm.HttpFilter_TypedConfig{TypedConfig: faultFilterOutAny},
+										},
+										{Name: "http-filter3"},
+										{Name: "http-filter2"},
+										{Name: "http-filter-5"},
+										{Name: "http-filter4"},
+									},
+								}),
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	waypointOut := []*listener.Listener{
+		{
+			Name:              "main_internal",
+			ListenerSpecifier: &listener.Listener_InternalListener{},
+			FilterChains: []*listener.FilterChain{
+				{
+					Name: "inbound-vip|8000|http|foo.not-default.svc.cluster.local",
+					Filters: []*listener.Filter{
+						{
+							Name: wellknown.HTTPConnectionManager,
+							ConfigType: &listener.Filter_TypedConfig{
+								TypedConfig: protoconv.MessageToAny(&hcm.HttpConnectionManager{
+									MaxRequestHeadersKb: wrapperspb.UInt32(96),
+									HttpFilters: []*hcm.HttpFilter{
+										{Name: "http-filter0"},
+										{
+											Name:       wellknown.Fault,
+											ConfigType: &hcm.HttpFilter_TypedConfig{TypedConfig: faultFilterOutAny},
+										},
+										{Name: "http-filter3"},
+										{Name: "http-filter2"},
+										{Name: "http-filter4"},
+									},
+								}),
+							},
+						},
+					},
+					TransportSocket: &core.TransportSocket{
+						Name: "envoy.transport_sockets.tls",
+						ConfigType: &core.TransportSocket_TypedConfig{
+							TypedConfig: protoconv.MessageToAny(&tls.DownstreamTlsContext{
+								CommonTlsContext: &tls.CommonTlsContext{
+									AlpnProtocols: []string{"h2-6380", "http/1.1-6380"},
+								},
+							}),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	waypointProxy := &model.Proxy{
+		Type:            model.Waypoint,
+		ConfigNamespace: "not-default",
+		Metadata: &model.NodeMetadata{
+			IstioVersion: "1.2.2",
+			Raw: map[string]any{
+				"foo": "sidecar",
+				"bar": "proxy",
+			},
+		},
+		Labels: map[string]string{
+			"gateway.networking.k8s.io/gateway-name": "simple-http-waypoint",
+		},
+	}
+
+	serviceDiscovery := memregistry.NewServiceDiscovery()
+	epWaypoint := newTestEnvironment(t, serviceDiscovery, testMesh, buildWaypointEnvoyFilterConfigStoreWithConfig(waypointConfigPatches))
+	waypointPush := model.NewPushContext()
+	waypointPush.InitContext(epWaypoint, nil, nil)
+
+	services := []*model.Service{
+		{
+			Hostname: host.Name("foo.not-default.svc.cluster.local"),
+			Attributes: model.ServiceAttributes{
+				Namespace: "not-default",
+				Name:      "foo",
+				K8sAttributes: model.K8sAttributes{
+					ObjectName: "foo",
+				},
+				ServiceRegistry: provider.Kubernetes,
+			},
+		},
+	}
+
+	got := ApplyListenerPatches(networking.EnvoyFilter_WAYPOINT, waypointPush.EnvoyFilters(waypointProxy, services...),
+		waypointIn, false)
+	if diff := cmp.Diff(waypointOut, got, protocmp.Transform()); diff != "" {
+		t.Errorf("ApplyListenerPatches() waypoint mismatch (-want +got):\n%s", diff)
 	}
 }
