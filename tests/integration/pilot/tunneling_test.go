@@ -134,15 +134,21 @@ func TestTunnelingOutboundTraffic(t *testing.T) {
 				ctx.ConfigIstio().EvalFile(externalNs, templateParams, tunnelingDestinationRuleFile).ApplyOrFail(ctx)
 
 				for _, tc := range testCases {
+					isGatewayTest := strings.HasPrefix(tc.configDir, "gateway")
 					for _, file := range listFilesInDirectory(ctx, tc.configDir) {
 						ctx.ConfigIstio().EvalFile(meshNs, templateParams, file).ApplyOrFail(ctx)
 					}
+
+					// Wait until tunneling configuration is pushed to all relevant proxies
+					// before running traffic tests. Without this, the first request may hit
+					// a proxy that still has stale configuration, causing connection resets.
+					waitUntilTunnelingConfigurationIsAppliedOrFail(ctx, meshNs, i.Settings().EgressGatewayServiceNamespace,
+						i.Settings().EgressGatewayServiceName, isGatewayTest)
 
 					for _, spec := range requestsSpec {
 						testName := fmt.Sprintf("%s/%s/%s/%s-request",
 							proxyConfig.HTTPVersion, proxyConfig.TLSEnabledStr(), tc.configDir, spec.protocol)
 						ctx.NewSubTest(testName).Run(func(ctx framework.TestContext) {
-							// requests will fail until istio-proxy gets the Envoy configuration from istiod, so retries are necessary
 							retry.UntilSuccessOrFail(ctx, func() error {
 								client := apps.A[0]
 								target := apps.External.All[0]
@@ -296,6 +302,39 @@ func getPodStringProperty(ctx framework.TestContext, ns, selector string, getPod
 		return nil
 	}, retry.Timeout(30*time.Second))
 	return podProperty
+}
+
+func waitUntilTunnelingConfigurationIsAppliedOrFail(ctx framework.TestContext, meshNs string, egressNs string, egressLabel string, includeGateway bool) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		waitForTunnelingAppliedOrFail(ctx, meshNs, "a")
+	}()
+	if includeGateway {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			waitForTunnelingAppliedOrFail(ctx, egressNs, egressLabel)
+		}()
+	}
+	wg.Wait()
+}
+
+func waitForTunnelingAppliedOrFail(ctx framework.TestContext, ns, app string) {
+	istioCtl := istioctl.NewOrFail(ctx, istioctl.Config{Cluster: ctx.Clusters().Default()})
+	podName := getPodName(ctx, ns, app)
+	args := []string{"proxy-config", "listeners", "-n", ns, podName, "-o", "json"}
+	retry.UntilSuccessOrFail(ctx, func() error {
+		out, _, err := istioCtl.Invoke(args)
+		if err != nil {
+			return fmt.Errorf("failed to get listeners of %s/%s: %s", app, ns, err)
+		}
+		if !strings.Contains(out, "tunnelingConfig") {
+			return fmt.Errorf("tunnelingConfig has not yet been applied to istio-proxy configuration in %s/%s", app, ns)
+		}
+		return nil
+	}, retry.Timeout(30*time.Second))
 }
 
 func waitUntilTunnelingConfigurationIsRemovedOrFail(ctx framework.TestContext, meshNs string, egressNs string, egressLabel string) {
