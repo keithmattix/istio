@@ -18,8 +18,8 @@ package common
 
 import (
 	"fmt"
-	"slices"
 
+	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/test"
 	"istio.io/istio/pkg/test/framework"
 	"istio.io/istio/pkg/test/framework/components/echo"
