@@ -252,7 +252,11 @@ func TestTrafficWithEstablishedPodsIfCNIMissing(t *testing.T) {
 
 				// Our echo instances have already been deployed/configured by the CNI,
 				// so the CNI being removed should not disrupt them.
-				common.RunAllTrafficTests(t, i, apps.SingleNamespaceView())
+				// Skip consistent-hash: after CNI deletion, host health-check rules are
+				// removed which can eventually cause pod restarts. Consistent hashing
+				// pins all traffic from a given source to one backend, so if that
+				// backend is disrupted all retries fail deterministically.
+				common.RunAllTrafficTests(t, i, apps.SingleNamespaceView(), "consistent-hash")
 
 				// put it back
 				util.DeployCNIDaemonset(t, c, origDS)

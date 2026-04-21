@@ -18,6 +18,7 @@ package common
 
 import (
 	"fmt"
+	"slices"
 
 	"istio.io/istio/pkg/test"
 	"istio.io/istio/pkg/test/framework"
@@ -264,13 +265,25 @@ func skipAmbient(t framework.TestContext, reason string) skip {
 	return skip{skip: t.Settings().Ambient, reason: reason}
 }
 
-func RunAllTrafficTests(t framework.TestContext, i istio.Instance, apps deployment.SingleNamespaceView) {
+func RunAllTrafficTests(t framework.TestContext, i istio.Instance, apps deployment.SingleNamespaceView, skipCases ...string) {
 	RunCase := func(name string, f func(t TrafficContext)) {
+		if slices.Contains(skipCases, name) {
+			t.NewSubTest(name).Run(func(t framework.TestContext) {
+				t.Skip("skipped by caller")
+			})
+			return
+		}
 		t.NewSubTest(name).Run(func(t framework.TestContext) {
 			f(TrafficContext{TestContext: t, Apps: apps, Istio: i})
 		})
 	}
 	RunSkipAmbient := func(name string, f func(t TrafficContext), reason string) {
+		if slices.Contains(skipCases, name) {
+			t.NewSubTest(name).Run(func(t framework.TestContext) {
+				t.Skip("skipped by caller")
+			})
+			return
+		}
 		t.NewSubTest(name).Run(func(t framework.TestContext) {
 			if t.Settings().Ambient {
 				t.Skipf("ambient skipped: %v", reason)
