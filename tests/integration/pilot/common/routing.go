@@ -3144,6 +3144,9 @@ spec:
 					check.OK(),
 					ConsistentHostChecker,
 				),
+				Retry: echo.Retry{
+					Options: []retry.Option{retry.Timeout(60 * time.Second)},
+				},
 			}
 			if c.Config().WorkloadClass() == echo.Proxyless {
 				callOpts.Port = echo.Port{ServicePort: ports.GRPC.ServicePort, Protocol: protocol.GRPC}
