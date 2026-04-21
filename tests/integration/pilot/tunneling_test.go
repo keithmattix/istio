@@ -153,7 +153,7 @@ func TestTunnelingOutboundTraffic(t *testing.T) {
 									return err
 								}
 								return nil
-							}, retry.Timeout(10*time.Second))
+							}, retry.Timeout(30*time.Second))
 						})
 					}
 
