@@ -266,11 +266,17 @@ func skipAmbient(t framework.TestContext, reason string) skip {
 }
 
 func RunAllTrafficTests(t framework.TestContext, i istio.Instance, apps deployment.SingleNamespaceView, skipCases ...string) {
-	RunCase := func(name string, f func(t TrafficContext)) {
+	shouldSkip := func(name string) bool {
 		if slices.Contains(skipCases, name) {
 			t.NewSubTest(name).Run(func(t framework.TestContext) {
-				t.Skip("skipped by caller")
+				t.Skipf("test case %q excluded by caller", name)
 			})
+			return true
+		}
+		return false
+	}
+	RunCase := func(name string, f func(t TrafficContext)) {
+		if shouldSkip(name) {
 			return
 		}
 		t.NewSubTest(name).Run(func(t framework.TestContext) {
@@ -278,10 +284,7 @@ func RunAllTrafficTests(t framework.TestContext, i istio.Instance, apps deployme
 		})
 	}
 	RunSkipAmbient := func(name string, f func(t TrafficContext), reason string) {
-		if slices.Contains(skipCases, name) {
-			t.NewSubTest(name).Run(func(t framework.TestContext) {
-				t.Skip("skipped by caller")
-			})
+		if shouldSkip(name) {
 			return
 		}
 		t.NewSubTest(name).Run(func(t framework.TestContext) {
