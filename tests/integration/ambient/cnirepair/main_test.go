@@ -202,7 +202,7 @@ func TestTrafficWithCNIRepair(t *testing.T) {
 		TopLevel().
 		Run(func(t framework.TestContext) {
 			if !crd.SupportsGatewayAPI(t) {
-				t.Skip("Gateway API is not supported on this cluster version")
+				t.Skip("requires Gateway API support (k8s >= 1.31)")
 			}
 			apps := common_deploy.NewOrFail(t, common_deploy.Config{
 				NoExternalNamespace: true,
