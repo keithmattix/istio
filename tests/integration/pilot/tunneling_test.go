@@ -305,21 +305,15 @@ func getPodStringProperty(ctx framework.TestContext, ns, selector string, getPod
 	return podProperty
 }
 
-func waitUntilTunnelingConfigurationIsAppliedOrFail(ctx framework.TestContext, meshNs string, egressNs string, egressLabel string, includeGateway bool) {
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+func waitUntilTunnelingConfigurationIsAppliedOrFail(ctx framework.TestContext, meshNs string, egressNs string, egressLabel string, isGatewayTest bool) {
+	if isGatewayTest {
+		// For gateway test cases, the tunneling config is on the egress gateway's
+		// listener (not the sidecar). The sidecar routes to the egress gateway normally.
+		waitForTunnelingAppliedOrFail(ctx, egressNs, egressLabel)
+	} else {
+		// For sidecar test cases, the tunneling config is on the sidecar's outbound listener.
 		waitForTunnelingAppliedOrFail(ctx, meshNs, "a")
-	}()
-	if includeGateway {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			waitForTunnelingAppliedOrFail(ctx, egressNs, egressLabel)
-		}()
 	}
-	wg.Wait()
 }
 
 func waitForTunnelingAppliedOrFail(ctx framework.TestContext, ns, app string) {
