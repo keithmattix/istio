@@ -330,8 +330,8 @@ func waitForTunnelingAppliedOrFail(ctx framework.TestContext, ns, app string) {
 		if err != nil {
 			return fmt.Errorf("failed to get listeners of %s/%s: %s", app, ns, err)
 		}
-		if !strings.Contains(out, "tunnelingConfig") {
-			return fmt.Errorf("tunnelingConfig has not yet been applied to istio-proxy configuration in %s/%s", app, ns)
+		if !strings.Contains(out, "tunneling_config") {
+			return fmt.Errorf("tunneling_config has not yet been applied to istio-proxy configuration in %s/%s", app, ns)
 		}
 		return nil
 	}, retry.Timeout(30*time.Second))
@@ -361,8 +361,8 @@ func waitForTunnelingRemovedOrFail(ctx framework.TestContext, ns, app string) {
 		if err != nil {
 			return fmt.Errorf("failed to get listeners of %s/%s: %s", app, ns, err)
 		}
-		if strings.Contains(out, "tunnelingConfig") {
-			return fmt.Errorf("tunnelingConfig was not removed from istio-proxy configuration in %s/%s", app, ns)
+		if strings.Contains(out, "tunneling_config") {
+			return fmt.Errorf("tunneling_config was not removed from istio-proxy configuration in %s/%s", app, ns)
 		}
 		return nil
 	}, retry.Timeout(10*time.Second))
