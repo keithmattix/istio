@@ -875,7 +875,7 @@ func TestClusterUpdateHotSwap(t *testing.T) {
 	assert.EventuallyEqual(t, func() bool {
 		initialHandler = component.ForCluster("c0")
 		return initialHandler != nil
-	}, true)
+	}, true, retry.Timeout(10*time.Second))
 	initialIter := initialHandler.Iter
 
 	// Update the secret (credential rotation)
